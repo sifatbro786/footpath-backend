@@ -4,7 +4,7 @@
 import HeroItem from "../models/Hero.js";
 
 // @desc    Get all active hero items
-// @route   GET /api/v1/hero-items
+// @route   GET /api/hero-items
 // @access  Public
 export const getActiveHeroItems = async (req, res) => {
     try {
@@ -37,7 +37,7 @@ export const getActiveHeroItems = async (req, res) => {
 };
 
 // @desc    Get hero item by ID
-// @route   GET /api/v1/hero-items/:id
+// @route   GET /api/hero-items/:id
 // @access  Public
 export const getHeroItemById = async (req, res) => {
     try {

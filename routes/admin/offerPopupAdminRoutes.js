@@ -1,13 +1,13 @@
-// routes/admin/offerPopupAdminRoutes.js — mounted at /api/v1/admin/offers
+// routes/admin/offerPopupAdminRoutes.js — mounted at /api/admin/offers
 import express from "express";
 import {
     createOffer,
-    updateOffer,
     deleteOffer,
     getAllOffers,
     toggleOfferStatus,
+    updateOffer,
 } from "../../controllers/offerPopupController.js";
-import { protect, adminOnly } from "../../middlewares/authMiddleware.js";
+import { adminOnly, protect } from "../../middlewares/authMiddleware.js";
 
 const router = express.Router();
 

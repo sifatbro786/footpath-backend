@@ -4,7 +4,7 @@
 // endpoint). `orderController.js`'s `createOrder` — the endpoint that actually
 // creates the order — trusted `shippingPrice`, `taxPrice`, and
 // `discountAmount` directly from the request body instead of recomputing
-// them. A client could call POST /api/v1/orders directly (skipping the
+// them. A client could call POST /api/orders directly (skipping the
 // preview call) with any shipping/discount values it wanted.
 //
 // This service is now the single source of truth for these calculations,
@@ -114,12 +114,19 @@ export const calculateShippingCharge = async ({
     });
 
     if (!rateDoc) {
-        return { rateDoc: null, shippingPrice: null, error: "Shipping rate configuration not found." };
+        return {
+            rateDoc: null,
+            shippingPrice: null,
+            error: "Shipping rate configuration not found.",
+        };
     }
 
     let shippingPrice = rateDoc.baseCharge;
 
-    if (rateDoc.freeShippingThreshold && orderAmountAfterDiscount >= rateDoc.freeShippingThreshold) {
+    if (
+        rateDoc.freeShippingThreshold &&
+        orderAmountAfterDiscount >= rateDoc.freeShippingThreshold
+    ) {
         shippingPrice = 0;
     } else if (
         rateDoc.reducedShippingThreshold &&

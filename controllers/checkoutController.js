@@ -1,9 +1,9 @@
 import Cart from "../models/Cart.js";
-import { District, CourierBranch, ShippingRate } from "../models/ShippingConfig.js";
+import { CourierBranch, District, ShippingRate } from "../models/ShippingConfig.js";
 import {
-    isHomeDeliveryOnly,
-    calculateCODCharge,
     applyCouponLogic as applyCouponLogicShared,
+    calculateCODCharge,
+    isHomeDeliveryOnly,
 } from "../services/pricingService.js";
 
 // Thin wrapper kept for this file's existing call signature (itemsToProcess
@@ -37,7 +37,7 @@ const shippingZoneToLocationType = (shippingZone) => {
 };
 
 // @desc    Get all active districts
-// @route   GET /api/v1/checkout/districts
+// @route   GET /api/checkout/districts
 // @access  Public
 export const getDistricts = async (req, res) => {
     try {
@@ -53,7 +53,7 @@ export const getDistricts = async (req, res) => {
 };
 
 // @desc    Get upazilas by district
-// @route   GET /api/v1/checkout/upazilas/:district
+// @route   GET /api/checkout/upazilas/:district
 // @access  Public
 export const getUpazilas = async (req, res) => {
     try {
@@ -72,7 +72,7 @@ export const getUpazilas = async (req, res) => {
 };
 
 // @desc    Get courier branches by district
-// @route   GET /api/v1/checkout/courier-branches/:district
+// @route   GET /api/checkout/courier-branches/:district
 // @access  Public
 export const getCourierBranches = async (req, res) => {
     try {
@@ -114,7 +114,7 @@ export const getCourierBranches = async (req, res) => {
 };
 
 // @desc    Validate location and return locationType + available delivery types
-// @route   POST /api/v1/checkout/validate-location
+// @route   POST /api/checkout/validate-location
 // @access  Public
 export const validateLocation = async (req, res) => {
     try {
@@ -156,7 +156,7 @@ export const validateLocation = async (req, res) => {
 };
 
 // @desc    Validate location type (alias)
-// @route   POST /api/v1/checkout/validate-location-type
+// @route   POST /api/checkout/validate-location-type
 // @access  Public
 export const validateLocationType = async (req, res) => {
     try {
@@ -196,7 +196,7 @@ export const validateLocationType = async (req, res) => {
 };
 
 // @desc    Calculate checkout totals (shipping, discount, tax, final total)
-// @route   POST /api/v1/checkout/calculate
+// @route   POST /api/checkout/calculate
 // @access  Public / Private
 export const calculateCheckoutData = async (req, res, next) => {
     try {
@@ -504,7 +504,7 @@ export const calculateCheckoutData = async (req, res, next) => {
 };
 
 // @desc    Get all districts that have courier service
-// @route   GET /api/v1/checkout/courier-districts
+// @route   GET /api/checkout/courier-districts
 // @access  Public
 export const getCourierDistricts = async (req, res) => {
     try {

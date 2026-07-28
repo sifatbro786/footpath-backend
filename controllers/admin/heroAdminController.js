@@ -4,7 +4,7 @@
 import HeroItem from "../../models/Hero.js";
 
 // @desc    Create new hero item
-// @route   POST /api/v1/admin/hero-items
+// @route   POST /api/admin/hero-items
 // @access  Private/Admin
 export const createHeroItem = async (req, res) => {
     try {
@@ -53,7 +53,7 @@ export const createHeroItem = async (req, res) => {
 };
 
 // @desc    Update hero item
-// @route   PUT /api/v1/admin/hero-items/:id
+// @route   PUT /api/admin/hero-items/:id
 // @access  Private/Admin
 export const updateHeroItem = async (req, res) => {
     try {
@@ -111,7 +111,7 @@ export const updateHeroItem = async (req, res) => {
 };
 
 // @desc    Delete hero item
-// @route   DELETE /api/v1/admin/hero-items/:id
+// @route   DELETE /api/admin/hero-items/:id
 // @access  Private/Admin
 export const deleteHeroItem = async (req, res) => {
     try {
@@ -146,7 +146,7 @@ export const deleteHeroItem = async (req, res) => {
 };
 
 // @desc    Bulk update hero items order
-// @route   PUT /api/v1/admin/hero-items
+// @route   PUT /api/admin/hero-items
 // @access  Private/Admin
 export const reorderHeroItems = async (req, res) => {
     try {

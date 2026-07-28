@@ -213,7 +213,7 @@ export const getCart = async (req, res, next) => {
 };
 
 // @desc    Add item to cart
-// @route   POST /api/v1/cart
+// @route   POST /api/cart
 // @access  Private (protect middleware ensures req.user exists)
 export const addItemToCart = async (req, res, next) => {
     // FIX (critical, price-tampering): `finalPrice`, `basePrice`, and
@@ -393,7 +393,7 @@ export const addItemToCart = async (req, res, next) => {
 };
 
 // @desc    Update item quantity in cart
-// @route   PUT /api/v1/cart/:itemId
+// @route   PUT /api/cart/:itemId
 // @access  Private
 export const updateCartItem = async (req, res, next) => {
     const { quantity } = req.body; // Debugging
@@ -461,7 +461,7 @@ export const updateCartItem = async (req, res, next) => {
 };
 
 // @desc    Remove item from cart
-// @route   DELETE /api/v1/cart/:itemId
+// @route   DELETE /api/cart/:itemId
 // @access  Private
 export const removeItemFromCart = async (req, res, next) => {
     if (!req.user || !req.user.id) {

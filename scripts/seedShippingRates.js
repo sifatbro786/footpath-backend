@@ -4,7 +4,7 @@
 // returns nothing and every checkout fails with "Shipping rate configuration
 // not found"). Values below are just a starting point (per the owner's
 // 70/100/130/170 scheme) — adjust them anytime from the admin panel afterward
-// (PUT /api/v1/admin/shipping/rates/:id), no need to re-run this script.
+// (PUT /api/admin/shipping/rates/:id), no need to re-run this script.
 //
 // Usage:
 //   node scripts/seedShippingRates.js
@@ -35,7 +35,9 @@ const run = async () => {
             deliveryType: rate.deliveryType,
         });
         if (exists) {
-            console.log(`⏭  Skipping (already exists): ${rate.locationType} / ${rate.deliveryType}`);
+            console.log(
+                `⏭  Skipping (already exists): ${rate.locationType} / ${rate.deliveryType}`,
+            );
             continue;
         }
         await ShippingRate.create({
@@ -44,7 +46,9 @@ const run = async () => {
             codChargeValue: 20,
             isActive: true,
         });
-        console.log(`✅ Created: ${rate.locationType} / ${rate.deliveryType} → ৳${rate.baseCharge}`);
+        console.log(
+            `✅ Created: ${rate.locationType} / ${rate.deliveryType} → ৳${rate.baseCharge}`,
+        );
     }
 
     console.log("\nDone. Adjust these anytime from the admin panel.");

@@ -36,9 +36,9 @@ router.get("/filter/attributes", getProductsByAttributes);
 router.get("/filter/multiple-attributes", getProductsByMultipleAttributes);
 router.get("/homepage-sections", getHomepageSections);
 router.get("/dynamic-section/:sectionId", getProductsForDynamicSection);
+router.get("/related", getRelatedProducts);
 router.get("/:id", getProductById);
 router.get("/slug/:slug", getProductBySlug);
-router.get("/related", getRelatedProducts);
 
 // Get products with custom ordering (for public storefront)
 router.get("/ordered/list", getOrderedProducts);

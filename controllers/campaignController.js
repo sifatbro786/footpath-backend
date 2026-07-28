@@ -1,6 +1,6 @@
 import Campaign from "../models/Campaign.js";
 
-// GET /api/v1/campaign - সব campaigns
+// GET /api/campaign - সব campaigns
 export const getCampaigns = async (req, res) => {
     try {
         console.log("📨 Fetching campaigns request received");
@@ -27,7 +27,7 @@ export const getCampaigns = async (req, res) => {
     }
 };
 
-// POST /api/v1/campaign - নতুন campaign create
+// POST /api/campaign - নতুন campaign create
 export const createCampaign = async (req, res) => {
     try {
         console.log("📨 Create campaign request:", req.body);
@@ -54,7 +54,7 @@ export const createCampaign = async (req, res) => {
     }
 };
 
-// PUT /api/v1/campaign/:id - campaign update
+// PUT /api/campaign/:id - campaign update
 export const updateCampaign = async (req, res) => {
     try {
         console.log("📨 Update campaign request for ID:", req.params.id);
@@ -99,7 +99,7 @@ export const updateCampaign = async (req, res) => {
     }
 };
 
-// DELETE /api/v1/campaign/:id - campaign delete
+// DELETE /api/campaign/:id - campaign delete
 export const deleteCampaign = async (req, res) => {
     try {
         console.log("📨 Delete campaign request for ID:", req.params.id);
@@ -128,7 +128,7 @@ export const deleteCampaign = async (req, res) => {
     }
 };
 
-// GET /api/v1/campaign/:id - single campaign
+// GET /api/campaign/:id - single campaign
 export const getCampaignById = async (req, res) => {
     try {
         const campaign = await Campaign.findById(req.params.id)

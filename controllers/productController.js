@@ -259,8 +259,7 @@ export const createProduct = async (req, res) => {
                         sku: variant.sku || "",
                     };
                 });
-            }
-            {
+            } else {
                 console.log("Auto-generating all variant combinations");
                 productData.variants = generateAllVariants(req.body.variantOptions, {
                     basePrice: productData.basePrice,
@@ -639,6 +638,15 @@ export const getAdminProducts = async (req, res) => {
                 break;
             case "viewCount":
                 sortOptions = { viewCount: sortOrder === "asc" ? 1 : -1 };
+                break;
+            case "name":
+                sortOptions = { name: sortOrder === "asc" ? 1 : -1 };
+                break;
+            case "price":
+                sortOptions = { price: sortOrder === "asc" ? 1 : -1 };
+                break;
+            case "newest":
+                sortOptions = { createdAt: sortOrder === "asc" ? 1 : -1 };
                 break;
             default:
                 sortOptions = { displayOrder: 1 }; //  ascending by default
@@ -1915,20 +1923,24 @@ export const getFeaturedProducts = async (req, res) => {
 export const updateStock = async (req, res) => {
     try {
         const { quantity } = req.body;
+        const qty = parseInt(quantity);
 
-        const product = await Product.findById(req.params.id);
+        const filter = { _id: req.params.id };
+        if (qty < 0) filter.stock = { $gte: -qty }; // block oversell on decrements
+
+        const product = await Product.findOneAndUpdate(
+            filter,
+            { $inc: { stock: qty } },
+            { new: true },
+        );
 
         if (!product) {
-            return res.status(404).json({
+            const exists = await Product.exists({ _id: req.params.id });
+            return res.status(exists ? 400 : 404).json({
                 success: false,
-                message: "Product not found",
+                message: exists ? "Insufficient stock" : "Product not found",
             });
         }
-
-        product.stock += quantity;
-
-        await product.save();
-
         res.status(200).json({
             success: true,
             message: "Stock updated successfully",

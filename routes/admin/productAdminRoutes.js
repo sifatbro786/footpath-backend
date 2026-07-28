@@ -1,30 +1,30 @@
 import express from "express";
 import {
-    createProduct,
-    getAdminProducts,
-    updateProduct,
-    deleteProduct,
-    updateStock,
-    createDynamicSection,
-    updateDynamicSection,
-    deleteDynamicSection,
-    getAllDynamicSections,
-    toggleSectionStatus,
-    searchProductsForAdmin,
-    getAdminProductsOptimized,
-    reorderProducts,
     bulkUpdateCategoryOrders,
-    getOrderedProducts,
+    createDynamicSection,
+    createProduct,
+    deleteDynamicSection,
+    deleteProduct,
+    getAdminProducts,
+    getAdminProductsOptimized,
+    getAllDynamicSections,
     getNextDisplayOrder,
+    getOrderedProducts,
+    reorderProducts,
+    searchProductsForAdmin,
+    toggleSectionStatus,
+    updateDynamicSection,
+    updateProduct,
+    updateStock,
 } from "../../controllers/productController.js";
 
 import { body } from "express-validator";
-import { protect, admin } from "../../middlewares/authMiddleware.js";
+import { admin, protect } from "../../middlewares/authMiddleware.js";
 import { setUploadDir, uploadSingle } from "../../middlewares/upload.js";
 
 const router = express.Router();
 
-// Mounted at /api/v1/admin/products — all routes here are admin-only.
+// Mounted at /api/admin/products — all routes here are admin-only.
 router.use(protect, admin);
 
 const productValidationRules = [
@@ -64,7 +64,11 @@ router.get("/dashboard/optimized", getAdminProductsOptimized);
 
 // Ordering
 router.put("/reorder", reorderValidationRules, reorderProducts);
-router.put("/category/:categoryId/reorder", bulkCategoryOrderValidationRules, bulkUpdateCategoryOrders);
+router.put(
+    "/category/:categoryId/reorder",
+    bulkCategoryOrderValidationRules,
+    bulkUpdateCategoryOrders,
+);
 router.get("/next-order", getNextDisplayOrder);
 router.get("/next-order/category/:categoryId", getNextDisplayOrder);
 router.get("/ordered-list", getOrderedProducts);

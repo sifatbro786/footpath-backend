@@ -1,10 +1,10 @@
 import mongoose from "mongoose";
-import Order from "../models/Order.js";
 import Cart from "../models/Cart.js";
+import Order from "../models/Order.js";
 import Product from "../models/Product.js";
 import { computeOrderTotals } from "../services/pricingService.js";
-import { incrementCouponUsage } from "./couponController.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
+import { incrementCouponUsage } from "./couponController.js";
 
 import { initializePayment } from "../config/sslcommerz.js";
 
@@ -40,7 +40,9 @@ export const updateProductStock = async (orderItems, action = "decrease", sessio
                     (v) =>
                         v.options.length === item.variant.options.length &&
                         item.variant.options.every((opt) =>
-                            v.options.some((vOpt) => vOpt.name === opt.name && vOpt.value === opt.value),
+                            v.options.some(
+                                (vOpt) => vOpt.name === opt.name && vOpt.value === opt.value,
+                            ),
                         ),
                 );
             }
@@ -79,7 +81,7 @@ export const updateProductStock = async (orderItems, action = "decrease", sessio
 };
 
 // @desc    Create a new order
-// @route   POST /api/v1/orders
+// @route   POST /api/orders
 // @access  Public/Private
 export const createOrder = async (req, res, next) => {
     const session = await mongoose.startSession();
@@ -503,7 +505,7 @@ const getOrderItemName = (productName, variant, variantDisplayName) => {
 };
 
 // @desc    Get my orders
-// @route   GET /api/v1/orders
+// @route   GET /api/orders
 // @access  Private
 export const getMyOrders = async (req, res, next) => {
     try {
@@ -521,7 +523,7 @@ export const getMyOrders = async (req, res, next) => {
 };
 
 // @desc    Get order by ID
-// @route   GET /api/v1/orders/:id
+// @route   GET /api/orders/:id
 // @access  Private/Public
 export const getOrderById = async (req, res, next) => {
     try {
@@ -574,7 +576,7 @@ export const getOrderById = async (req, res, next) => {
 };
 
 // @desc    Get all orders (Admin)
-// @route   GET /api/v1/admin/orders
+// @route   GET /api/admin/orders
 // @access  Private/Admin
 export const getAllOrders = async (req, res, next) => {
     try {
@@ -632,7 +634,7 @@ export const getAllOrders = async (req, res, next) => {
 };
 
 // @desc    Get order statistics (Admin)
-// @route   GET /api/v1/admin/orders/stats
+// @route   GET /api/admin/orders/stats
 // @access  Private/Admin
 export const getOrderStats = async (req, res, next) => {
     try {
@@ -681,7 +683,7 @@ export const getOrderStats = async (req, res, next) => {
 };
 
 // @desc    Update order status (Admin)
-// @route   PUT /api/v1/admin/orders/:id/status
+// @route   PUT /api/admin/orders/:id/status
 // @access  Private/Admin
 
 export const updateOrderStatus = async (req, res, next) => {
@@ -795,7 +797,7 @@ export const updateOrderStatus = async (req, res, next) => {
 };
 
 // @desc    Update payment status (Admin)
-// @route   PUT /api/v1/admin/orders/:id/payment
+// @route   PUT /api/admin/orders/:id/payment
 // @access  Private/Admin
 export const updatePaymentStatus = async (req, res, next) => {
     try {
@@ -950,7 +952,7 @@ export const updateOrder = async (req, res, next) => {
 };
 
 // @desc    Add admin note to order
-// @route   POST /api/v1/admin/orders/:id/notes
+// @route   POST /api/admin/orders/:id/notes
 // @access  Private/Admin
 export const addAdminNote = async (req, res, next) => {
     try {
@@ -993,7 +995,7 @@ export const addAdminNote = async (req, res, next) => {
 };
 
 // @desc    Delete order (Admin)
-// @route   DELETE /api/v1/admin/orders/:id
+// @route   DELETE /api/admin/orders/:id
 // @access  Private/Admin
 export const deleteOrder = async (req, res, next) => {
     try {

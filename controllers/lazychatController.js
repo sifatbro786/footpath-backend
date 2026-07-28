@@ -1,6 +1,6 @@
-import Product from "../models/Product.js";
-import Order from "../models/Order.js";
 import mongoose from "mongoose";
+import Order from "../models/Order.js";
+import Product from "../models/Product.js";
 
 const transformProduct = (product) => {
     const BASE_URL = process.env.SITE_URL || "https://www.innoelbd.com";
@@ -98,7 +98,7 @@ const transformProduct = (product) => {
 };
 
 // ─────────────────────────────────────────────
-// GET /api/v1/lazychat/products
+// GET /api/lazychat/products
 // ─────────────────────────────────────────────
 export const getLazychatProducts = async (req, res) => {
     try {
@@ -127,7 +127,7 @@ export const getLazychatProducts = async (req, res) => {
 };
 
 // ─────────────────────────────────────────────
-// POST /api/v1/lazychat/order/create
+// POST /api/lazychat/order/create
 // ─────────────────────────────────────────────
 export const createLazychatOrder = async (req, res) => {
     try {

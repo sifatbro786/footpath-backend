@@ -1,11 +1,10 @@
 import Order from "../../models/Order.js";
-import User from "../../models/User.js";
 import Product from "../../models/Product.js";
-import Category from "../../models/Category.js";
+import User from "../../models/User.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 
 // @desc    Get all dashboard analytics
-// @route   GET /api/v1/admin/analytics
+// @route   GET /api/admin/analytics
 // @access  Private/Admin
 export const getAdminAnalytics = asyncHandler(async (req, res) => {
     // 1. Order Stats
@@ -155,7 +154,7 @@ export const getAdminAnalytics = asyncHandler(async (req, res) => {
 });
 
 // @desc    Get all users
-// @route   GET /api/v1/admin/users
+// @route   GET /api/admin/users
 // @access  Private/Admin
 export const getUsers = async (req, res) => {
     try {
@@ -176,7 +175,7 @@ export const getUsers = async (req, res) => {
 };
 
 // @desc    Create new user (admin only)
-// @route   POST /api/v1/admin/users
+// @route   POST /api/admin/users
 // @access  Private/Admin
 export const createUser = async (req, res) => {
     try {
@@ -229,7 +228,7 @@ export const createUser = async (req, res) => {
 };
 
 // @desc    Update user role
-// @route   PUT /api/v1/admin/users/:id/role
+// @route   PUT /api/admin/users/:id/role
 // @access  Private/Admin
 export const updateUserRole = async (req, res) => {
     try {
@@ -262,7 +261,7 @@ export const updateUserRole = async (req, res) => {
     }
 };
 // @desc    Delete user
-// @route   DELETE /api/v1/admin/users/:id
+// @route   DELETE /api/admin/users/:id
 // @access  Private/Admin
 export const deleteUser = async (req, res) => {
     try {
@@ -289,7 +288,7 @@ export const deleteUser = async (req, res) => {
 };
 
 // @desc    Get single user
-// @route   GET /api/v1/admin/users/:id
+// @route   GET /api/admin/users/:id
 // @access  Private/Admin
 export const getUser = async (req, res) => {
     try {
@@ -316,7 +315,7 @@ export const getUser = async (req, res) => {
 };
 
 // @desc    Update user status
-// @route   PUT /api/v1/admin/users/:id/status
+// @route   PUT /api/admin/users/:id/status
 // @access  Private/Admin
 export const updateUserStatus = async (req, res) => {
     try {

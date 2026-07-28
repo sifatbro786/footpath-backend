@@ -1,7 +1,7 @@
-import User from "../models/User.js";
-import { sendEmail } from "../services/emailService.js";
 import crypto from "crypto";
 import jwt from "jsonwebtoken"; // 💡 jwt আমদানি করুন টোকেন তৈরি করার জন্য
+import User from "../models/User.js";
+import { sendEmail } from "../services/emailService.js";
 
 // ✅ Generate token response - এখন expiresDays প্যারামিটার নেবে
 const sendTokenResponse = (user, statusCode, res, expiresDays) => {
@@ -30,7 +30,7 @@ const sendTokenResponse = (user, statusCode, res, expiresDays) => {
 };
 
 // @desc    Register a new user
-// @route   POST /api/v1/auth/register
+// @route   POST /api/auth/register
 // @access  Public
 // controllers/authController.js - Register function update
 export const register = async (req, res, next) => {
@@ -137,7 +137,7 @@ export const register = async (req, res, next) => {
 };
 
 // @desc    Verify email with OTP
-// @route   POST /api/v1/auth/verify-email
+// @route   POST /api/auth/verify-email
 // @access  Public
 export const verifyEmail = async (req, res, next) => {
     try {
@@ -186,7 +186,7 @@ export const verifyEmail = async (req, res, next) => {
 };
 
 // @desc    Resend verification OTP
-// @route   POST /api/v1/auth/resend-verification
+// @route   POST /api/auth/resend-verification
 // @access  Public
 export const resendVerification = async (req, res, next) => {
     try {
@@ -252,7 +252,7 @@ export const resendVerification = async (req, res, next) => {
 };
 
 // @desc    Login user
-// @route   POST /api/v1/auth/login
+// @route   POST /api/auth/login
 // @access  Public
 export const login = async (req, res, next) => {
     try {
@@ -320,7 +320,7 @@ export const login = async (req, res, next) => {
 };
 
 // @desc    Forgot password
-// @route   POST /api/v1/auth/forgot-password
+// @route   POST /api/auth/forgot-password
 // @access  Public
 export const forgotPassword = async (req, res, next) => {
     try {
@@ -379,7 +379,7 @@ export const forgotPassword = async (req, res, next) => {
 };
 
 // @desc    Reset password with OTP
-// @route   PUT /api/v1/auth/reset-password
+// @route   PUT /api/auth/reset-password
 // @access  Public
 export const resetPassword = async (req, res, next) => {
     try {
@@ -427,7 +427,7 @@ export const resetPassword = async (req, res, next) => {
 };
 
 // @desc    Get current user
-// @route   GET /api/v1/auth/me
+// @route   GET /api/auth/me
 // @access  Private
 export const getMe = async (req, res, next) => {
     try {
@@ -447,7 +447,7 @@ export const getMe = async (req, res, next) => {
 };
 
 // @desc    Update user profile
-// @route   PUT /api/v1/auth/profile
+// @route   PUT /api/auth/profile
 // @access  Private
 export const updateProfile = async (req, res, next) => {
     try {
@@ -485,7 +485,7 @@ export const updateProfile = async (req, res, next) => {
 };
 
 // @desc    Logout user
-// @route   GET /api/v1/auth/logout
+// @route   GET /api/auth/logout
 // @access  Private
 export const logout = (req, res, next) => {
     res.cookie("token", "none", {
@@ -534,7 +534,7 @@ export const addShippingAddress = async (req, res, next) => {
 };
 
 // @desc    Update an existing shipping address
-// @route   PUT /api/v1/auth/address/:addressId
+// @route   PUT /api/auth/address/:addressId
 // @access  Private
 export const updateShippingAddress = async (req, res, next) => {
     try {
@@ -592,7 +592,7 @@ export const updateShippingAddress = async (req, res, next) => {
 };
 
 // @desc    Delete a shipping address
-// @route   DELETE /api/v1/auth/address/:addressId
+// @route   DELETE /api/auth/address/:addressId
 // @access  Private
 export const deleteShippingAddress = async (req, res, next) => {
     try {

@@ -1,12 +1,12 @@
-// routes/admin/heroContentAdminRoutes.js — mounted at /api/v1/admin/hero-content
+// routes/admin/heroContentAdminRoutes.js — mounted at /api/admin/hero-content
 import express from "express";
 import {
-    getAllHeroContent,
     createHeroContent,
-    updateHeroContent,
     deleteHeroContent,
+    getAllHeroContent,
+    updateHeroContent,
 } from "../../controllers/heroContentController.js";
-import { protect, admin } from "../../middlewares/authMiddleware.js";
+import { admin, protect } from "../../middlewares/authMiddleware.js";
 
 const router = express.Router();
 

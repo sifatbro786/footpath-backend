@@ -24,7 +24,7 @@ router.post("/", async (req, res) => {
         }
 
         // ৩. FAQ না মেললে AI কে প্রশ্ন পাঠানো
-        const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        const groqRes = await fetch("https://api.groq.com/openai/chat/completions", {
             method: "POST",
             headers: {
                 Authorization: `Bearer ${process.env.GROQ_API_KEY}`,

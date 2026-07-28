@@ -1,11 +1,10 @@
 import mongoose from "mongoose";
 import Order from "../../models/Order.js";
 import Product from "../../models/Product.js";
-import Category from "../../models/Category.js";
 import User from "../../models/User.js";
 
 // @desc    Get comprehensive analytics dashboard data
-// @route   GET /api/v1/admin/analytics/dashboard
+// @route   GET /api/admin/analytics/dashboard
 // @access  Private/Admin
 export const getDashboardAnalytics = async (req, res, next) => {
     try {
@@ -213,7 +212,7 @@ export const getDashboardAnalytics = async (req, res, next) => {
 };
 
 // @desc    Get sales report with filters
-// @route   GET /api/v1/admin/analytics/sales-report
+// @route   GET /api/admin/analytics/sales-report
 // @access  Private/Admin
 export const getSalesReport = async (req, res, next) => {
     try {

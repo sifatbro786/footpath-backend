@@ -1,4 +1,4 @@
-// routes/admin/aplusContentAdminRoutes.js — mounted at /api/v1/admin/aplus-content
+// routes/admin/aplusContentAdminRoutes.js — mounted at /api/admin/aplus-content
 import express from "express";
 import {
     createOrUpdateAplusContent,

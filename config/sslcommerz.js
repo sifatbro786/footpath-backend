@@ -1,6 +1,6 @@
 import axios from "axios";
-import qs from "qs";
 import dotenv from "dotenv";
+import qs from "qs";
 dotenv.config();
 
 // FIX (critical): these were previously hardcoded to "" / "" / false, ignoring
@@ -45,10 +45,10 @@ export const initializePayment = async (orderId, paymentData) => {
         currency: "BDT",
         tran_id: orderId.toString(),
 
-        success_url: `${BASE_URL}/api/v1/payment/process-success?orderId=${orderId}`,
-        fail_url: `${BASE_URL}/api/v1/payment/process-fail?orderId=${orderId}`,
-        cancel_url: `${BASE_URL}/api/v1/payment/process-cancel?orderId=${orderId}`,
-        ipn_url: `${BASE_URL}/api/v1/payment/ipn`,
+        success_url: `${BASE_URL}/api/payment/process-success?orderId=${orderId}`,
+        fail_url: `${BASE_URL}/api/payment/process-fail?orderId=${orderId}`,
+        cancel_url: `${BASE_URL}/api/payment/process-cancel?orderId=${orderId}`,
+        ipn_url: `${BASE_URL}/api/payment/ipn`,
 
         shipping_method: "YES",
         ship_name: cus_name,

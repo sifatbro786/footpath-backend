@@ -1,10 +1,10 @@
 // controllers/heroContentController.js
 
-import HeroContent from "../models/HeroContent.js";
 import asyncHandler from "express-async-handler"; // ধরে নিলাম আপনি এটি ব্যবহার করছেন
+import HeroContent from "../models/HeroContent.js";
 
 // @desc    Get all active hero content, grouped by device type
-// @route   GET /api/v1/hero
+// @route   GET /api/hero
 // @access  Public
 const getActiveHeroContent = asyncHandler(async (req, res) => {
     const activeContent = await HeroContent.find({ isActive: true }).sort({ order: 1 });
@@ -38,7 +38,7 @@ const getActiveHeroContent = asyncHandler(async (req, res) => {
 // --- Admin CRUD Operations ---
 
 // @desc    Get all hero content (for Admin panel)
-// @route   GET /api/v1/admin/hero
+// @route   GET /api/admin/hero
 // @access  Private/Admin
 const getAllHeroContent = asyncHandler(async (req, res) => {
     const content = await HeroContent.find({}).sort({ deviceType: 1, order: 1 });
@@ -46,7 +46,7 @@ const getAllHeroContent = asyncHandler(async (req, res) => {
 });
 
 // @desc    Create new hero content
-// @route   POST /api/v1/admin/hero
+// @route   POST /api/admin/hero
 // @access  Private/Admin
 const createHeroContent = asyncHandler(async (req, res) => {
     const {
@@ -78,7 +78,7 @@ const createHeroContent = asyncHandler(async (req, res) => {
 });
 
 // @desc    Update hero content
-// @route   PUT /api/v1/admin/hero/:id
+// @route   PUT /api/admin/hero/:id
 // @access  Private/Admin
 const updateHeroContent = asyncHandler(async (req, res) => {
     const {
@@ -114,7 +114,7 @@ const updateHeroContent = asyncHandler(async (req, res) => {
 });
 
 // @desc    Delete hero content
-// @route   DELETE /api/v1/admin/hero/:id
+// @route   DELETE /api/admin/hero/:id
 // @access  Private/Admin
 const deleteHeroContent = asyncHandler(async (req, res) => {
     const content = await HeroContent.findById(req.params.id);
@@ -129,9 +129,9 @@ const deleteHeroContent = asyncHandler(async (req, res) => {
 });
 
 export {
+    createHeroContent,
+    deleteHeroContent,
     getActiveHeroContent,
     getAllHeroContent,
-    createHeroContent,
     updateHeroContent,
-    deleteHeroContent,
 };

@@ -1,9 +1,9 @@
 // controllers/admin.shippingController.js
-import { District, CourierBranch, ShippingRate } from "../../models/ShippingConfig.js";
+import { CourierBranch, District, ShippingRate } from "../../models/ShippingConfig.js";
 
 // ==================== DISTRICTS ====================
 
-// GET /api/v1/admin/shipping/districts
+// GET /api/admin/shipping/districts
 export const getAllDistricts = async (req, res) => {
     try {
         const districts = await District.find().sort({ name: 1 });
@@ -13,7 +13,7 @@ export const getAllDistricts = async (req, res) => {
     }
 };
 
-// GET /api/v1/admin/shipping/districts/:id
+// GET /api/admin/shipping/districts/:id
 export const getDistrictById = async (req, res) => {
     try {
         const district = await District.findById(req.params.id);
@@ -25,7 +25,7 @@ export const getDistrictById = async (req, res) => {
     }
 };
 
-// POST /api/v1/admin/shipping/districts
+// POST /api/admin/shipping/districts
 export const createDistrict = async (req, res) => {
     try {
         const { name, upazilas, isActive } = req.body;
@@ -43,7 +43,7 @@ export const createDistrict = async (req, res) => {
     }
 };
 
-// PUT /api/v1/admin/shipping/districts/:id
+// PUT /api/admin/shipping/districts/:id
 export const updateDistrict = async (req, res) => {
     try {
         const { name, upazilas, isActive } = req.body;
@@ -60,7 +60,7 @@ export const updateDistrict = async (req, res) => {
     }
 };
 
-// DELETE /api/v1/admin/shipping/districts/:id
+// DELETE /api/admin/shipping/districts/:id
 export const deleteDistrict = async (req, res) => {
     try {
         const district = await District.findByIdAndDelete(req.params.id);
@@ -72,7 +72,7 @@ export const deleteDistrict = async (req, res) => {
     }
 };
 
-// POST /api/v1/admin/shipping/districts/:id/upazilas
+// POST /api/admin/shipping/districts/:id/upazilas
 export const addUpazila = async (req, res) => {
     try {
         const { name, shippingZone } = req.body;
@@ -98,7 +98,7 @@ export const addUpazila = async (req, res) => {
     }
 };
 
-// PUT /api/v1/admin/shipping/districts/:id/upazilas/:upazilaId
+// PUT /api/admin/shipping/districts/:id/upazilas/:upazilaId
 export const updateUpazila = async (req, res) => {
     try {
         const { name, shippingZone } = req.body;
@@ -119,7 +119,7 @@ export const updateUpazila = async (req, res) => {
     }
 };
 
-// DELETE /api/v1/admin/shipping/districts/:id/upazilas/:upazilaId
+// DELETE /api/admin/shipping/districts/:id/upazilas/:upazilaId
 export const deleteUpazila = async (req, res) => {
     try {
         const district = await District.findById(req.params.id);
@@ -138,7 +138,7 @@ export const deleteUpazila = async (req, res) => {
 
 // ==================== COURIER BRANCHES ====================
 
-// GET /api/v1/admin/shipping/courier-branches
+// GET /api/admin/shipping/courier-branches
 export const getAllCourierBranches = async (req, res) => {
     try {
         const branches = await CourierBranch.find().sort({ district: 1 });
@@ -148,7 +148,7 @@ export const getAllCourierBranches = async (req, res) => {
     }
 };
 
-// POST /api/v1/admin/shipping/courier-branches
+// POST /api/admin/shipping/courier-branches
 export const createCourierBranch = async (req, res) => {
     try {
         const { district, branches } = req.body;
@@ -157,12 +157,10 @@ export const createCourierBranch = async (req, res) => {
 
         const exists = await CourierBranch.findOne({ district });
         if (exists)
-            return res
-                .status(400)
-                .json({
-                    success: false,
-                    message: "Courier config for this district already exists. Use update instead.",
-                });
+            return res.status(400).json({
+                success: false,
+                message: "Courier config for this district already exists. Use update instead.",
+            });
 
         const record = await CourierBranch.create({ district, branches: branches || [] });
         res.status(201).json({ success: true, message: "Courier branch config created", record });
@@ -171,7 +169,7 @@ export const createCourierBranch = async (req, res) => {
     }
 };
 
-// PUT /api/v1/admin/shipping/courier-branches/:id
+// PUT /api/admin/shipping/courier-branches/:id
 export const updateCourierBranch = async (req, res) => {
     try {
         const { district, branches, isActive } = req.body;
@@ -190,7 +188,7 @@ export const updateCourierBranch = async (req, res) => {
     }
 };
 
-// DELETE /api/v1/admin/shipping/courier-branches/:id
+// DELETE /api/admin/shipping/courier-branches/:id
 export const deleteCourierBranch = async (req, res) => {
     try {
         const record = await CourierBranch.findByIdAndDelete(req.params.id);
@@ -204,7 +202,7 @@ export const deleteCourierBranch = async (req, res) => {
     }
 };
 
-// POST /api/v1/admin/shipping/courier-branches/:id/add-branch
+// POST /api/admin/shipping/courier-branches/:id/add-branch
 export const addBranchToDistrict = async (req, res) => {
     try {
         const { branchName } = req.body;
@@ -226,7 +224,7 @@ export const addBranchToDistrict = async (req, res) => {
     }
 };
 
-// DELETE /api/v1/admin/shipping/courier-branches/:id/remove-branch
+// DELETE /api/admin/shipping/courier-branches/:id/remove-branch
 export const removeBranchFromDistrict = async (req, res) => {
     try {
         const { branchName } = req.body;
@@ -243,7 +241,7 @@ export const removeBranchFromDistrict = async (req, res) => {
 
 // ==================== SHIPPING RATES ====================
 
-// GET /api/v1/admin/shipping/rates
+// GET /api/admin/shipping/rates
 export const getAllShippingRates = async (req, res) => {
     try {
         const rates = await ShippingRate.find().sort({ locationType: 1, deliveryType: 1 });
@@ -261,7 +259,7 @@ export const getAllShippingRates = async (req, res) => {
     }
 };
 
-// POST /api/v1/admin/shipping/rates
+// POST /api/admin/shipping/rates
 // FIX: there was no way to create a ShippingRate document anywhere in the
 // codebase — only update-by-id existed. On a brand-new database this means
 // the rates list is empty, the admin has nothing to edit, and checkout always
@@ -292,7 +290,8 @@ export const createShippingRate = async (req, res) => {
         if (exists) {
             return res.status(400).json({
                 success: false,
-                message: "A rate for this locationType + deliveryType already exists. Use update instead.",
+                message:
+                    "A rate for this locationType + deliveryType already exists. Use update instead.",
             });
         }
 
@@ -318,7 +317,7 @@ export const createShippingRate = async (req, res) => {
     }
 };
 
-// PUT /api/v1/admin/shipping/rates/:id
+// PUT /api/admin/shipping/rates/:id
 export const updateShippingRate = async (req, res) => {
     try {
         const { id } = req.params;

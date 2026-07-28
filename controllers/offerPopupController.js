@@ -3,7 +3,7 @@ import OfferPopup from "../models/OfferPopup.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
 
 // @desc    Get active offers for frontend
-// @route   GET /api/v1/offers/active
+// @route   GET /api/offers/active
 // @access  Public
 export const getActiveOffers = async (req, res) => {
     try {
@@ -32,7 +32,7 @@ export const getActiveOffers = async (req, res) => {
 };
 
 // @desc    Get single offer by ID
-// @route   GET /api/v1/offers/:id
+// @route   GET /api/offers/:id
 // @access  Public
 export const getOfferById = async (req, res) => {
     try {
@@ -59,7 +59,7 @@ export const getOfferById = async (req, res) => {
 };
 
 // @desc    Create new offer (Admin only)
-// @route   POST /api/v1/admin/offers
+// @route   POST /api/admin/offers
 // @access  Private/Admin
 export const createOffer = async (req, res) => {
     try {
@@ -126,7 +126,7 @@ export const createOffer = async (req, res) => {
 };
 
 // @desc    Update offer (Admin only)
-// @route   PUT /api/v1/admin/offers/:id
+// @route   PUT /api/admin/offers/:id
 // @access  Private/Admin
 export const updateOffer = async (req, res) => {
     try {
@@ -173,7 +173,7 @@ export const updateOffer = async (req, res) => {
 };
 
 // @desc    Delete offer (Admin only)
-// @route   DELETE /api/v1/admin/offers/:id
+// @route   DELETE /api/admin/offers/:id
 // @access  Private/Admin
 export const deleteOffer = async (req, res) => {
     try {
@@ -202,7 +202,7 @@ export const deleteOffer = async (req, res) => {
 };
 
 // @desc    Get all offers with filters (Admin only)
-// @route   GET /api/v1/admin/offers
+// @route   GET /api/admin/offers
 // @access  Private/Admin
 export const getAllOffers = async (req, res) => {
     try {
@@ -257,7 +257,7 @@ export const getAllOffers = async (req, res) => {
 };
 
 // @desc    Toggle offer active status (Admin only)
-// @route   PATCH /api/v1/admin/offers/:id/toggle
+// @route   PATCH /api/admin/offers/:id/toggle
 // @access  Private/Admin
 export const toggleOfferStatus = async (req, res) => {
     try {

@@ -1,4 +1,4 @@
-// routes/admin/categoryAdminRoutes.js — mounted at /api/v1/admin/categories
+// routes/admin/categoryAdminRoutes.js — mounted at /api/admin/categories
 // FIX (critical): none of these mutating routes had ANY auth middleware in the
 // original categoryRoutes.js, despite the controller doc-comments saying
 // "@access Private/Admin" — anyone could create/update/delete categories and
@@ -6,12 +6,12 @@
 import express from "express";
 import {
     createCategory,
-    updateCategory,
     deleteCategory,
     deleteCategoryImage,
+    updateCategory,
 } from "../../controllers/categoryController.js";
+import { admin, protect } from "../../middlewares/authMiddleware.js";
 import { uploadCategoryImage } from "../../middlewares/uploadCategoryImage.js";
-import { protect, admin } from "../../middlewares/authMiddleware.js";
 
 const router = express.Router();
 

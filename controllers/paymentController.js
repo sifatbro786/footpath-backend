@@ -1,5 +1,5 @@
-import Order from "../models/Order.js";
 import { verifyPayment } from "../config/sslcommerz.js";
+import Order from "../models/Order.js";
 import { updateProductStock } from "./orderController.js";
 
 const getClientUrl = () => {
@@ -64,7 +64,7 @@ export const processSuccessRedirect = async (req, res) => {
         // claiming it was "development mode" but NO actual environment check.
         // This endpoint is public and unauthenticated (SSLCommerz redirects the
         // customer's browser here) — anyone could call
-        // GET /api/v1/payment/process-success?orderId=<any pending order id>
+        // GET /api/payment/process-success?orderId=<any pending order id>
         // with no val_id at all and have the order marked Paid/Confirmed for
         // free, in production. Verification against SSLCommerz's validation API
         // is now mandatory whenever val_id is present; if it's missing, the

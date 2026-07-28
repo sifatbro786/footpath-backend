@@ -1,10 +1,14 @@
+import {
+    deleteImageFile,
+    getFilePathFromUrl,
+    getImageUrl,
+} from "../middlewares/uploadCategoryImage.js";
 import Category from "../models/Category.js";
-import { asyncHandler } from "../utils/asyncHandler.js";
 import { APIFeatures } from "../utils/apiFeatures.js";
-import { deleteImageFile, getImageUrl, getFilePathFromUrl } from "../middlewares/uploadCategoryImage.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 
 // @desc    Get all categories with tree structure
-// @route   GET /api/v1/categories/tree
+// @route   GET /api/categories/tree
 // @access  Public
 export const getCategoryTree = asyncHandler(async (req, res) => {
     const {
@@ -117,7 +121,7 @@ export const getCategoryTree = asyncHandler(async (req, res) => {
 });
 
 // @desc    Get all categories (flat list)
-// @route   GET /api/v1/categories
+// @route   GET /api/categories
 // @access  Public
 export const getCategories = asyncHandler(async (req, res) => {
     const features = new APIFeatures(Category.find(), req.query)
@@ -139,7 +143,7 @@ export const getCategories = asyncHandler(async (req, res) => {
 });
 
 // @desc    Get single category
-// @route   GET /api/v1/categories/:id
+// @route   GET /api/categories/:id
 // @access  Public
 export const getCategory = asyncHandler(async (req, res) => {
     const category = await Category.findById(req.params.id)
@@ -160,7 +164,7 @@ export const getCategory = asyncHandler(async (req, res) => {
 });
 
 // @desc    Create new category
-// @route   POST /api/v1/categories
+// @route   POST /api/categories
 // @access  Private/Admin
 export const createCategory = asyncHandler(async (req, res) => {
     const categoryData = { ...req.body };
@@ -181,7 +185,7 @@ export const createCategory = asyncHandler(async (req, res) => {
 });
 
 // @desc    Update category
-// @route   PUT /api/v1/categories/:id
+// @route   PUT /api/categories/:id
 // @access  Private/Admin
 export const updateCategory = asyncHandler(async (req, res) => {
     let category = await Category.findById(req.params.id);
@@ -221,7 +225,7 @@ export const updateCategory = asyncHandler(async (req, res) => {
 });
 
 // @desc    Delete category
-// @route   DELETE /api/v1/categories/:id
+// @route   DELETE /api/categories/:id
 // @access  Private/Admin
 export const deleteCategory = asyncHandler(async (req, res) => {
     const category = await Category.findById(req.params.id);
@@ -253,7 +257,7 @@ export const deleteCategory = asyncHandler(async (req, res) => {
 });
 
 // @desc    Get category path/breadcrumb
-// @route   GET /api/v1/categories/:id/path
+// @route   GET /api/categories/:id/path
 // @access  Public
 export const getCategoryPath = asyncHandler(async (req, res) => {
     const category = await Category.findById(req.params.id);
@@ -289,7 +293,7 @@ export const getCategoryPath = asyncHandler(async (req, res) => {
 });
 
 // @desc    Delete category image
-// @route   DELETE /api/v1/categories/:id/image
+// @route   DELETE /api/categories/:id/image
 // @access  Private/Admin
 export const deleteCategoryImage = asyncHandler(async (req, res) => {
     const category = await Category.findById(req.params.id);
