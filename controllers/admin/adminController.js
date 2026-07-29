@@ -2,6 +2,7 @@ import Order from "../../models/Order.js";
 import Product from "../../models/Product.js";
 import User from "../../models/User.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
+import { escapeRegex } from "../../utils/escapeRegex.js";
 
 // @desc    Get all dashboard analytics
 // @route   GET /api/admin/analytics
@@ -158,11 +159,34 @@ export const getAdminAnalytics = asyncHandler(async (req, res) => {
 // @access  Private/Admin
 export const getUsers = async (req, res) => {
     try {
-        const users = await User.find().select("-password");
+        const { search, role, status, page = 1, limit = 20 } = req.query;
+
+        const filter = {};
+        if (role) filter.role = role;
+        if (status) filter.status = status;
+        if (search) {
+            const regex = new RegExp(escapeRegex(search), "i");
+            filter.$or = [{ name: regex }, { email: regex }];
+        }
+
+        const pageNum = Math.max(1, Number(page) || 1);
+        const limitNum = Math.max(1, Number(limit) || 20);
+
+        const [users, total] = await Promise.all([
+            User.find(filter)
+                .select("-password")
+                .sort("-createdAt")
+                .skip((pageNum - 1) * limitNum)
+                .limit(limitNum),
+            User.countDocuments(filter),
+        ]);
 
         res.status(200).json({
             success: true,
             count: users.length,
+            total,
+            page: pageNum,
+            pages: Math.ceil(total / limitNum) || 1,
             users,
         });
     } catch (error) {
@@ -187,6 +211,14 @@ export const createUser = async (req, res) => {
             return res.status(400).json({
                 success: false,
                 message: "User already exists with this email",
+            });
+        }
+
+        // FIX: only an executive can create another executive-level account.
+        if (role === "executive" && req.user.role !== "executive") {
+            return res.status(403).json({
+                success: false,
+                message: "Only an executive can grant the executive role",
             });
         }
 
@@ -234,6 +266,37 @@ export const updateUserRole = async (req, res) => {
     try {
         const { role } = req.body;
 
+        // FIX: block self-role-change — otherwise an admin can strip their
+        // own access with no one left to reverse it.
+        if (req.params.id === req.user.id) {
+            return res.status(400).json({
+                success: false,
+                message: "You cannot change your own role",
+            });
+        }
+
+        // FIX: only an executive can promote someone to executive.
+        if (role === "executive" && req.user.role !== "executive") {
+            return res.status(403).json({
+                success: false,
+                message: "Only an executive can grant the executive role",
+            });
+        }
+
+        // FIX: an executive account can only be modified by another
+        // executive — otherwise a plain admin could demote/strip access
+        // from the top-level account.
+        const target = await User.findById(req.params.id).select("role");
+        if (!target) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+        if (target.role === "executive" && req.user.role !== "executive") {
+            return res.status(403).json({
+                success: false,
+                message: "Only an executive can modify another executive's role",
+            });
+        }
+
         const user = await User.findByIdAndUpdate(
             req.params.id,
             { role },
@@ -265,6 +328,25 @@ export const updateUserRole = async (req, res) => {
 // @access  Private/Admin
 export const deleteUser = async (req, res) => {
     try {
+        // FIX: block self-delete.
+        if (req.params.id === req.user.id) {
+            return res.status(400).json({
+                success: false,
+                message: "You cannot delete your own account",
+            });
+        }
+
+        const target = await User.findById(req.params.id).select("role");
+        if (!target) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+        if (target.role === "executive" && req.user.role !== "executive") {
+            return res.status(403).json({
+                success: false,
+                message: "Only an executive can delete another executive's account",
+            });
+        }
+
         const user = await User.findByIdAndDelete(req.params.id);
 
         if (!user) {
@@ -321,11 +403,30 @@ export const updateUserStatus = async (req, res) => {
     try {
         const { status } = req.body;
 
+        // FIX: block self-status-change
+        if (req.params.id === req.user.id) {
+            return res.status(400).json({
+                success: false,
+                message: "You cannot change your own status",
+            });
+        }
+
         const validStatuses = ["active", "suspended", "inactive"];
         if (!validStatuses.includes(status)) {
             return res.status(400).json({
                 success: false,
                 message: "Invalid status value",
+            });
+        }
+
+        const target = await User.findById(req.params.id).select("role");
+        if (!target) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+        if (target.role === "executive" && req.user.role !== "executive") {
+            return res.status(403).json({
+                success: false,
+                message: "Only an executive can change another executive's status",
             });
         }
 

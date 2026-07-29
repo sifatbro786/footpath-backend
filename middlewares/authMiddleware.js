@@ -51,9 +51,14 @@ export const optionalProtect = async (req, res, next) => {
     }
 };
 
-// UPDATED: Admin middleware (existing) - alias for adminOnly
+// FIX: role hierarchy — "executive" sits above "admin" and must pass every
+// admin-gated route too. Previously this checked role === "admin" only, so
+// any executive account (schema allows it; it's your top "System
+// Administrator" account) got 403 on literally every /admin/* route.
+const ADMIN_ROLES = ["admin", "executive"];
+
 export const admin = (req, res, next) => {
-    if (req.user && req.user.role === "admin") {
+    if (req.user && ADMIN_ROLES.includes(req.user.role)) {
         next();
     } else {
         res.status(403).json({
@@ -63,17 +68,8 @@ export const admin = (req, res, next) => {
     }
 };
 
-// NEW: adminOnly middleware (same as admin but with different name)
-export const adminOnly = (req, res, next) => {
-    if (req.user && req.user.role === "admin") {
-        next();
-    } else {
-        res.status(403).json({
-            success: false,
-            message: "Not authorized as admin",
-        });
-    }
-};
+// alias, kept because several route files import it by this name
+export const adminOnly = admin;
 
 // NEW: Authorize middleware for multiple roles
 export const authorize = (...roles) => {
@@ -107,18 +103,6 @@ export const executiveOrAdmin = (req, res, next) => {
     }
 };
 
-// NEW: Editor or Admin middleware
-export const editorOrAdmin = (req, res, next) => {
-    if (req.user && (req.user.role === "editor" || req.user.role === "admin")) {
-        next();
-    } else {
-        res.status(403).json({
-            success: false,
-            message: "Not authorized as editor or admin",
-        });
-    }
-};
-
 // NEW: Check if user is verified
 export const requireVerifiedEmail = (req, res, next) => {
     if (req.user && !req.user.isEmailVerified) {
@@ -146,6 +130,3 @@ export const adminProtect = [protect, adminOnly];
 
 // NEW: Combined middleware for protected executive routes
 export const executiveProtect = [protect, executiveOrAdmin];
-
-// NEW: Combined middleware for protected editor routes
-export const editorProtect = [protect, editorOrAdmin];
