@@ -4,6 +4,42 @@ import Product from "../models/Product.js";
 import mongoose from "mongoose";
 import { validationResult } from "express-validator";
 
+// Helper function to update product rating
+const updateProductRating = async (productId) => {
+    try {
+        const stats = await Review.aggregate([
+            {
+                $match: {
+                    product: new mongoose.Types.ObjectId(productId),
+                    status: "approved",
+                },
+            },
+            {
+                $group: {
+                    _id: "$product",
+                    averageRating: { $avg: "$rating" },
+                    numReviews: { $sum: 1 },
+                },
+            },
+        ]);
+
+        if (stats.length > 0) {
+            await Product.findByIdAndUpdate(productId, {
+                averageRating: Math.round(stats[0].averageRating * 10) / 10,
+                numReviews: stats[0].numReviews,
+            });
+        } else {
+            // No approved reviews, reset ratings
+            await Product.findByIdAndUpdate(productId, {
+                averageRating: 0,
+                numReviews: 0,
+            });
+        }
+    } catch (error) {
+        console.error("Error updating product rating:", error);
+    }
+};
+
 // User adds a review
 export const addReview = async (req, res) => {
     try {
@@ -297,9 +333,10 @@ export const getPendingReviews = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
 
+        // ✅ FIX: "images" doesn't exist on Product top level
         const reviews = await Review.find({ status: "pending" })
             .populate("user", "name email")
-            .populate("product", "name slug images")
+            .populate("product", "name slug sku") // ✅ Changed from "images" to "sku"
             .sort({ createdAt: -1 })
             .limit(limit * 1)
             .skip((page - 1) * limit);
@@ -336,11 +373,14 @@ export const updateReviewStatus = async (req, res) => {
             });
         }
 
+        // ✅ FIX: null (not undefined) so re-approving actually clears a
+        // previous rejection's note instead of Mongoose silently
+        // dropping the undefined key from the update.
         const review = await Review.findByIdAndUpdate(
             reviewId,
             {
                 status,
-                adminNotes: status === "rejected" ? adminNotes : undefined,
+                adminNotes: status === "rejected" ? adminNotes : null, // ✅ Fixed
             },
             { new: true },
         )
@@ -374,39 +414,37 @@ export const updateReviewStatus = async (req, res) => {
     }
 };
 
-// Helper function to update product rating
-const updateProductRating = async (productId) => {
+// Admin permanently delete any review (spam/abuse)
+export const deleteReviewAdmin = async (req, res) => {
     try {
-        const stats = await Review.aggregate([
-            {
-                $match: {
-                    product: new mongoose.Types.ObjectId(productId),
-                    status: "approved",
-                },
-            },
-            {
-                $group: {
-                    _id: "$product",
-                    averageRating: { $avg: "$rating" },
-                    numReviews: { $sum: 1 },
-                },
-            },
-        ]);
+        const { reviewId } = req.params;
 
-        if (stats.length > 0) {
-            await Product.findByIdAndUpdate(productId, {
-                averageRating: Math.round(stats[0].averageRating * 10) / 10,
-                numReviews: stats[0].numReviews,
-            });
-        } else {
-            // No approved reviews, reset ratings
-            await Product.findByIdAndUpdate(productId, {
-                averageRating: 0,
-                numReviews: 0,
+        const review = await Review.findById(reviewId);
+        if (!review) {
+            return res.status(404).json({
+                success: false,
+                message: "Review not found",
             });
         }
+
+        await Review.findByIdAndDelete(reviewId);
+
+        // If review was approved, update product ratings
+        if (review.status === "approved") {
+            await updateProductRating(review.product);
+        }
+
+        res.status(200).json({
+            success: true,
+            message: "Review deleted successfully",
+        });
     } catch (error) {
-        console.error("Error updating product rating:", error);
+        console.error("Error deleting review (admin):", error);
+        res.status(500).json({
+            success: false,
+            message: "Error deleting review",
+            error: error.message,
+        });
     }
 };
 
@@ -439,14 +477,11 @@ export const addBulkDemoReviews = async (req, res) => {
         }
 
         // 2. Prepare reviews for bulk insertion
-        // We create unique placeholder user IDs for each review to bypass the unique index on { user: 1, product: 1 }
         const reviewsToInsert = bulkReviews.map((review) => ({
             ...review,
             product: new mongoose.Types.ObjectId(productId),
-            // IMPORTANT: Use a new unique ObjectId for the 'user' field for *each* review.
-            // This simulates different users and respects the unique index.
             user: new mongoose.Types.ObjectId().toHexString(),
-            status: "approved", // Demo reviews are automatically approved
+            status: "approved",
             adminNotes: "Admin-generated demo review for initial social proof.",
         }));
 
@@ -454,7 +489,7 @@ export const addBulkDemoReviews = async (req, res) => {
         const result = await Review.insertMany(reviewsToInsert, { ordered: false });
 
         // 4. Update product statistics
-        await updateProductRating(productId); // This function should already exist in your file
+        await updateProductRating(productId);
 
         res.status(201).json({
             success: true,
@@ -464,7 +499,6 @@ export const addBulkDemoReviews = async (req, res) => {
     } catch (error) {
         console.error("Error adding bulk demo reviews:", error);
         if (error.code === 11000) {
-            // Handle unique key errors (less likely with unique ObjectId generation, but good practice)
             return res.status(500).json({
                 success: false,
                 message: "A unique key constraint violation occurred during bulk insert.",
@@ -486,36 +520,52 @@ export const addBulkDemoReviews = async (req, res) => {
  */
 export const getAllReviewsAndStats = async (req, res) => {
     try {
-        // --- 1. Fetch All Reviews ---
-        const reviews = await Review.find({})
-            .populate("product", "name image") // Populate with product name and image
-            .populate("user", "name email") // Populate with user name and email
-            .sort({ createdAt: -1 }) // Latest reviews first
-            .limit(100); // Limit to a reasonable number for performance
+        // FIX: Added page, limit, status query params
+        const { page = 1, limit = 10, status } = req.query;
+        const pageNum = Math.max(1, Number(page) || 1);
+        const limitNum = Math.max(1, Number(limit) || 10);
+
+        const filter = {};
+        if (["pending", "approved", "rejected"].includes(status)) {
+            filter.status = status;
+        }
+
+        // FIX: "image"/"images" don't exist on Product top level
+        // FIX: Added total, totalAll, pendingCount, page, totalPages, averageRating
+        const [reviews, total, totalAll, pendingCount] = await Promise.all([
+            Review.find(filter)
+                .populate("product", "name slug sku") // ✅ Changed from "image"
+                .populate("user", "name email")
+                .sort({ createdAt: -1 })
+                .skip((pageNum - 1) * limitNum)
+                .limit(limitNum),
+            Review.countDocuments(filter),
+            Review.countDocuments({}),
+            Review.countDocuments({ status: "pending" }),
+        ]);
 
         // --- 2. Star Rating Analysis (Aggregation) ---
         const starStats = await Review.aggregate([
             {
-                // We only analyze approved reviews for meaningful statistics
                 $match: {
                     status: "approved",
                 },
             },
             {
                 $group: {
-                    _id: "$rating", // Group by rating (1, 2, 3, 4, 5)
-                    count: { $sum: 1 }, // Count how many reviews have this rating
+                    _id: "$rating",
+                    count: { $sum: 1 },
                 },
             },
             {
                 $project: {
-                    _id: 0, // Exclude the default _id
+                    _id: 0,
                     rating: "$_id",
                     count: 1,
                 },
             },
             {
-                $sort: { rating: -1 }, // Sort from 5 stars down to 1 star
+                $sort: { rating: -1 },
             },
         ]);
 
@@ -531,12 +581,30 @@ export const getAllReviewsAndStats = async (req, res) => {
                     : 0,
         }));
 
+        // ✅ NEW: Calculate average rating
+        const averageRating =
+            totalApprovedReviews > 0
+                ? parseFloat(
+                      (
+                          starStats.reduce((sum, s) => sum + s.rating * s.count, 0) /
+                          totalApprovedReviews
+                      ).toFixed(2),
+                  )
+                : 0;
+
         res.status(200).json({
             success: true,
             message: "All reviews and star statistics retrieved successfully",
             reviews,
             starStats: formattedStarStats,
             totalApprovedReviews,
+            // ✅ NEW: Added pagination fields
+            total,
+            totalAll,
+            pendingCount,
+            page: pageNum,
+            totalPages: Math.ceil(total / limitNum) || 1,
+            averageRating,
         });
     } catch (error) {
         console.error("Error retrieving all reviews and statistics:", error);

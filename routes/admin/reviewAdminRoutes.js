@@ -4,6 +4,7 @@ import {
     updateReviewStatus,
     addBulkDemoReviews,
     getAllReviewsAndStats,
+    deleteReviewAdmin,
 } from "../../controllers/reviewController.js";
 import { body } from "express-validator";
 import { protect, admin } from "../../middlewares/authMiddleware.js";
@@ -28,5 +29,6 @@ router.get("/pending", getPendingReviews);
 router.get("/all", getAllReviewsAndStats);
 router.post("/bulk", bulkReviewValidationRules, addBulkDemoReviews);
 router.patch("/:reviewId/status", updateReviewStatus);
+router.delete("/:reviewId", deleteReviewAdmin);
 
 export default router;
