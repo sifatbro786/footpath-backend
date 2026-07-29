@@ -99,6 +99,13 @@ export const createOffer = async (req, res) => {
             createdBy: req.user._id,
         };
 
+        if (endDate && new Date(endDate) < new Date(offerData.startDate)) {
+            return res.status(400).json({
+                success: false,
+                message: "End date cannot be earlier than start date",
+            });
+        }
+
         const offer = await OfferPopup.create(offerData);
 
         res.status(201).json({
@@ -139,10 +146,33 @@ export const updateOffer = async (req, res) => {
             });
         }
 
-        const updateData = {
-            ...req.body,
-            updatedBy: req.user._id,
-        };
+        // Whitelist — never let the client spoof createdBy or inject stray fields
+        const ALLOWED = [
+            "title",
+            "description",
+            "thumbnailImage",
+            "buttonText",
+            "buttonLink",
+            "startDate",
+            "endDate",
+            "displayFrequency",
+            "priority",
+            "isActive",
+        ];
+        const updateData = { updatedBy: req.user._id };
+        for (const key of ALLOWED) {
+            if (req.body[key] !== undefined) updateData[key] = req.body[key];
+        }
+
+        // Guard: endDate must not precede startDate (falls back to existing values)
+        const start = updateData.startDate ?? offer.startDate;
+        const end = updateData.endDate ?? offer.endDate;
+        if (end && start && new Date(end) < new Date(start)) {
+            return res.status(400).json({
+                success: false,
+                message: "End date cannot be earlier than start date",
+            });
+        }
 
         const updatedOffer = await OfferPopup.findByIdAndUpdate(req.params.id, updateData, {
             new: true,

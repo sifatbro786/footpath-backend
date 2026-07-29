@@ -18,6 +18,9 @@ router.use(protect, admin);
 
 router.post("/single", upload.single("image"), uploadImage);
 router.post("/multiple", upload.array("images", 10), uploadMultipleImages);
-router.post("/offer", upload.single("image"), uploadOfferImage);
+// uploadOfferImage runs its OWN multer internally — do NOT add an outer
+// upload.single() here or it drains the stream first (req.file becomes
+// undefined → 400) and misfiles into products/. Saves to uploads/offers/.
+router.post("/offer", uploadOfferImage);
 
 export default router;
