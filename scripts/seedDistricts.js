@@ -15,7 +15,7 @@
 import mongoose from "mongoose";
 import dotenv from "dotenv";
 import { District } from "../models/ShippingConfig.js";
-import { districtsData } from "../data/districts.js";
+import { districtsData } from "../utils/districts.js";
 
 dotenv.config();
 
