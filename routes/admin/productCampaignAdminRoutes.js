@@ -9,6 +9,8 @@ import {
     rollbackCampaignManually,
     processAllCampaigns,
     getCampaignProducts,
+    getCampaigns,
+    getCampaignById,
 } from "../../controllers/productCampaignController.js";
 
 const router = express.Router();
@@ -24,7 +26,8 @@ const campaignValidationRules = [
     body("startDate").isISO8601().withMessage("Valid start date is required"),
     body("endDate").isISO8601().withMessage("Valid end date is required"),
 ];
-
+router.get("/", getCampaigns);
+router.get("/:id", getCampaignById);
 router.post("/", campaignValidationRules, createCampaign);
 router.put("/:id", updateCampaign);
 router.delete("/:id", deleteCampaign);

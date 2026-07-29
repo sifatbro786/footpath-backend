@@ -58,8 +58,13 @@ const variantSchema = new mongoose.Schema(
         stock: { type: Number, min: 0, default: 0 },
         imageGroupName: { type: String, trim: true },
         sku: { type: String, sparse: true },
-        // Variant level ordering
         order: { type: Number, default: 0 },
+        // ✅ ADD THIS NEW FIELD:
+        campaignPrice: {
+            type: Number,
+            default: null,
+            description: "Price when variant is under campaign",
+        },
     },
     { _id: false },
 );
@@ -390,7 +395,13 @@ function calculatePrice(basePrice, discountType, discountValue) {
 // Main pre-save hook for price calculation
 productSchema.pre("save", function (next) {
     // Main product price calculation
-    if (this.discountType !== "none" && this.discountValue > 0) {
+    if (
+        this.isUnderCampaign &&
+        this.campaignDiscount?.isActive &&
+        this.campaignDiscount.campaignPrice != null
+    ) {
+        this.price = this.campaignDiscount.campaignPrice;
+    } else if (this.discountType !== "none" && this.discountValue > 0) {
         this.price = calculatePrice(this.basePrice, this.discountType, this.discountValue);
     } else {
         this.price = this.basePrice;
@@ -400,10 +411,36 @@ productSchema.pre("save", function (next) {
     if (this.hasVariants && this.variants && this.variants.length > 0) {
         this.variants = this.variants.map((variant, idx) => {
             const variantBasePrice = variant.basePrice || this.basePrice;
-            let variantPrice = variantBasePrice; // Default price
+            let variantPrice = variantBasePrice;
 
-            // Use variant discount if available
+            // ✅ NEW: Check for campaign first (highest priority)
             if (
+                this.isUnderCampaign &&
+                this.campaignDiscount?.isActive &&
+                this.campaignDiscount.campaignPrice != null
+            ) {
+                // Apply campaign discount to variant
+                if (this.campaignDiscount.discountType === "percentage") {
+                    variantPrice = calculatePrice(
+                        variantBasePrice,
+                        "percentage",
+                        this.campaignDiscount.discountValue,
+                    );
+                } else if (this.campaignDiscount.discountType === "fixed") {
+                    variantPrice = calculatePrice(
+                        variantBasePrice,
+                        "fixed",
+                        this.campaignDiscount.discountValue,
+                    );
+                } else {
+                    variantPrice = variantBasePrice;
+                }
+
+                // Store campaign price for reference
+                variant.campaignPrice = variantPrice;
+            }
+            // Use variant discount if available
+            else if (
                 variant.discountType &&
                 variant.discountType !== "none" &&
                 variant.discountValue > 0
@@ -413,6 +450,7 @@ productSchema.pre("save", function (next) {
                     variant.discountType,
                     variant.discountValue,
                 );
+                variant.campaignPrice = null; // Clear campaign price
             }
             // Otherwise use product discount if available
             else if (this.discountType !== "none" && this.discountValue > 0) {
@@ -421,6 +459,9 @@ productSchema.pre("save", function (next) {
                     this.discountType,
                     this.discountValue,
                 );
+                variant.campaignPrice = null; // Clear campaign price
+            } else {
+                variant.campaignPrice = null; // Clear campaign price
             }
 
             // Set default order if not set

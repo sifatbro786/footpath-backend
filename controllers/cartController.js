@@ -1,7 +1,5 @@
 import Cart from "../models/Cart.js";
 import Product from "../models/Product.js";
-// import Campaign from '../models/Campaign.js';
-// import Promotion from '../models/Promotion.js';
 
 export const getCart = async (req, res, next) => {
     if (!req.user || !req.user.id) {

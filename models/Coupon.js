@@ -38,6 +38,16 @@ const couponSchema = new mongoose.Schema(
             default: 0,
             min: [0, "Minimum order amount cannot be negative"],
         },
+        // FIX: pricingService.js's applyCouponLogic already reads `coupon.maxDiscountAmount`
+        // to cap percentage discounts (e.g. "20% off, up to ৳500") but this field never
+        // existed on the schema, so `coupon.maxDiscountAmount` was always undefined and the
+        // cap silently never applied — a 20%-off coupon on a ৳50,000 order gave ৳10,000 off
+        // with no ceiling. Only meaningful for couponType "percentage"; ignored otherwise.
+        maxDiscountAmount: {
+            type: Number,
+            default: null,
+            min: [0, "Maximum discount amount cannot be negative"],
+        },
         maxUsage: {
             type: Number,
             default: 0,

@@ -90,10 +90,17 @@ export const processSuccessRedirect = async (req, res) => {
             if (order.paymentMethod === "COD") {
                 const codPaidAmount = order.codOnlinePaymentAmount || 0;
                 const remainingAmount = order.remainingAmount || order.totalPrice - codPaidAmount;
+                const isFullyPaid = codPaidAmount >= order.totalPrice;
 
                 order.orderStatus = "Confirmed";
-                order.paymentStatus = codPaidAmount >= order.totalPrice ? "Paid" : "Partially Paid";
-                order.paidAt = new Date();
+                // FIX: "Partially Paid" isn't a valid paymentStatus enum value (Order.js only
+                // allows Pending/Paid/Failed/Refunded) — this used to throw a ValidationError
+                // on save() for every COD order with a remaining balance, silently breaking
+                // order confirmation. paymentStatus now stays "Pending" until the full total is
+                // collected; the advance amount is still tracked via codOnlinePaymentAmount /
+                // remainingAmount and logged in adminNotes below.
+                order.paymentStatus = isFullyPaid ? "Paid" : "Pending";
+                if (isFullyPaid) order.paidAt = new Date();
                 order.paymentResult = {
                     id: finalOrderId,
                     status: "VALID",
@@ -282,10 +289,12 @@ export const handleIPN = async (req, res) => {
                 const remainingAmount = order.remainingAmount || order.totalPrice - codPaidAmount;
 
                 console.log(`IPN: COD Charge paid for order ${tran_id}: ${codPaidAmount} BDT`);
+                const isFullyPaidIPN = codPaidAmount >= order.totalPrice;
 
                 order.orderStatus = "Confirmed";
-                order.paymentStatus = codPaidAmount >= order.totalPrice ? "Paid" : "Partially Paid";
-                order.paidAt = new Date();
+                // FIX: same enum-mismatch bug as processSuccessRedirect — see comment there.
+                order.paymentStatus = isFullyPaidIPN ? "Paid" : "Pending";
+                if (isFullyPaidIPN) order.paidAt = new Date();
                 order.paymentResult = {
                     id: tran_id,
                     status: verificationResult.data?.status || "VALID",

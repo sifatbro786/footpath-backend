@@ -17,6 +17,15 @@ import { initializePayment } from "../config/sslcommerz.js";
 // createOrder below still trusts `shippingPrice`/`taxPrice` from the request body
 // instead of re-deriving them server-side.
 
+// Statuses in which stock has actually been decremented for this order.
+// Stock is only ever decremented in paymentController.js on verified payment
+// (COD advance charge -> "Confirmed", full online payment -> "Processing"), never
+// at order creation. Any status-change or delete logic that restores/re-decrements
+// stock MUST check against this list — comparing against "Cancelled" alone (the old
+// behavior) incorrectly restores stock for orders that were still "Pending" and never
+// had stock removed in the first place, silently inflating inventory.
+const STOCK_HELD_STATUSES = ["Confirmed", "Processing", "Shipped", "Delivered", "Refunded"];
+
 // Product Stock Update
 export const updateProductStock = async (orderItems, action = "decrease", session = null) => {
     const opts = session ? { session } : {};
@@ -251,6 +260,10 @@ export const createOrder = async (req, res, next) => {
             locationType,
             deliveryType: finalDeliveryType,
             isCOD,
+            // FIX: previously omitted — appliesTo="products"/"categories" coupon
+            // restrictions could not be checked without item-level product data,
+            // so real order creation ignored them entirely (see pricingService.js).
+            items: finalOrderItems,
         });
 
         if (!pricing.ok) {
@@ -771,9 +784,21 @@ export const updateOrderStatus = async (req, res, next) => {
             .populate("statusHistory.updatedBy", "name")
             .populate("user", "name email");
         console.log("Order updated successfully");
-        if (status === "Cancelled" && order.orderStatus !== "Cancelled") {
-            console.log("Restoring product stock for cancelled order");
+
+        // FIX: reconcile stock based on actual state transition, not just "-> Cancelled".
+        // `order.orderStatus` here is still the PRE-update value (order was fetched before
+        // the $set above). Only restore stock if the order is LEAVING a status where stock
+        // was actually held; only decrement if it's ENTERING one (e.g. an admin reverting a
+        // mistaken Cancel back to Confirmed) — using the same oversell-guarded atomic path
+        // as the payment flow.
+        const wasStockHeld = STOCK_HELD_STATUSES.includes(order.orderStatus);
+        const willHoldStock = STOCK_HELD_STATUSES.includes(status);
+        if (wasStockHeld && !willHoldStock) {
+            console.log("Restoring product stock — order left a stock-held status");
             await updateProductStock(order.orderItems, "increase");
+        } else if (!wasStockHeld && willHoldStock) {
+            console.log("Decrementing product stock — order entered a stock-held status");
+            await updateProductStock(order.orderItems, "decrease");
         }
         console.log("Order status update completed");
         res.status(200).json({
@@ -867,90 +892,6 @@ export const updatePaymentStatus = async (req, res, next) => {
     }
 };
 
-export const updateOrder = async (req, res, next) => {
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    try {
-        const { orderItems, shippingAddress, shippingPrice, taxPrice, note } = req.body;
-        const orderId = req.params.id;
-
-        const order = await Order.findById(orderId).session(session);
-
-        if (!order) {
-            await session.abortTransaction();
-            return res.status(404).json({ success: false, message: "Order not found" });
-        }
-        let itemsTotal = 0;
-        if (orderItems && Array.isArray(orderItems)) {
-            const newOrderItems = orderItems.map((item) => ({
-                ...item,
-                quantity: parseInt(item.quantity) || 0,
-                price: parseFloat(item.price) || 0,
-                product: item.product._id || item.product,
-            }));
-
-            await updateProductStock(order.orderItems, "increase", session);
-            order.orderItems = newOrderItems;
-            await updateProductStock(newOrderItems, "decrease", session);
-            itemsTotal = newOrderItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
-        } else {
-            itemsTotal = order.orderItems.reduce(
-                (sum, item) => sum + item.price * item.quantity,
-                0,
-            );
-        }
-        if (shippingAddress) {
-            order.shippingAddress = {
-                ...order.shippingAddress,
-                ...shippingAddress,
-            };
-        }
-
-        if (shippingPrice !== undefined) {
-            order.shippingPrice = parseFloat(shippingPrice) || 0;
-        }
-
-        if (taxPrice !== undefined) {
-            order.taxPrice = parseFloat(taxPrice) || 0;
-        }
-
-        order.totalPrice = itemsTotal + order.shippingPrice + order.taxPrice;
-        order.statusHistory.push({
-            status: order.orderStatus,
-            note: note || "Order details updated by admin",
-            updatedBy: req.user.id,
-            updatedAt: new Date(),
-        });
-
-        await order.save({ session, runValidators: true });
-        await session.commitTransaction();
-        const updatedOrder = await Order.findById(orderId)
-            .populate("user", "name email")
-            .populate("statusHistory.updatedBy", "name");
-        res.status(200).json({
-            success: true,
-            message: "Order updated successfully",
-            order: updatedOrder,
-        });
-    } catch (error) {
-        await session.abortTransaction();
-        console.error("Order update error:", error);
-        if (error.name === "ValidationError") {
-            const errors = Object.values(error.errors).map((err) => err.message);
-            return res.status(400).json({
-                success: false,
-                message: "Validation failed",
-                errors: errors,
-            });
-        }
-        return res
-            .status(500)
-            .json({ success: false, message: "Server error during order update" });
-    } finally {
-        session.endSession();
-    }
-};
-
 // @desc    Add admin note to order
 // @route   POST /api/admin/orders/:id/notes
 // @access  Private/Admin
@@ -1007,7 +948,10 @@ export const deleteOrder = async (req, res, next) => {
             });
         }
 
-        if (order.orderStatus !== "Cancelled") {
+        // FIX: same reconciliation bug as updateOrderStatus — a Pending order that's
+        // deleted never had stock decremented, so restoring it here used to inflate
+        // inventory. Only restore when the order was actually holding stock.
+        if (STOCK_HELD_STATUSES.includes(order.orderStatus)) {
             await updateProductStock(order.orderItems, "increase");
         }
         await Order.findByIdAndDelete(req.params.id);
@@ -1049,7 +993,12 @@ export const getOrderByIdAdmin = async (req, res, next) => {
     }
 };
 
+// @desc    Update order details (items/shipping/pricing/coupon) — Admin
+// @route   PUT /api/admin/orders/:id
+// @access  Private/Admin
 export const updateOrderDetails = async (req, res, next) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
     try {
         const {
             shippingAddress,
@@ -1061,38 +1010,30 @@ export const updateOrderDetails = async (req, res, next) => {
             note,
         } = req.body;
 
-        console.log("🔄 Order Update Request:", {
-            orderId: req.params.id,
-            itemsCount: orderItems?.length,
-            shippingPrice,
-            taxPrice,
-            user: req.user.id,
-        });
         let order;
         if (mongoose.Types.ObjectId.isValid(req.params.id)) {
-            order = await Order.findById(req.params.id);
+            order = await Order.findById(req.params.id).session(session);
         } else {
-            order = await Order.findOne({ orderNumber: req.params.id });
+            order = await Order.findOne({ orderNumber: req.params.id }).session(session);
         }
 
         if (!order) {
+            await session.abortTransaction();
             return res.status(404).json({
                 success: false,
                 message: "Order not found",
             });
         }
 
-        console.log("Order found:", order.orderNumber);
         if (shippingAddress) {
             order.shippingAddress = {
                 ...order.shippingAddress,
                 ...shippingAddress,
             };
-            console.log("Shipping address updated");
         }
 
         if (orderItems && Array.isArray(orderItems)) {
-            order.orderItems = orderItems.map((item) => ({
+            const newOrderItems = orderItems.map((item) => ({
                 name: item.name,
                 product: item.productId || item.product,
                 variant: item.variant || {},
@@ -1101,39 +1042,45 @@ export const updateOrderDetails = async (req, res, next) => {
                 image: item.image || "",
                 _id: item._id || new mongoose.Types.ObjectId(),
             }));
-            console.log("Order items updated:", orderItems.length);
+
+            // FIX: this endpoint used to swap order.orderItems in place without ever
+            // touching product stock, so any admin item edit (change qty, add/remove a
+            // line) silently desynced inventory from what was actually reserved at
+            // payment time. Stock is only ever held for orders in STOCK_HELD_STATUSES —
+            // for those, restore the OLD items' stock then atomically (oversell-guarded)
+            // decrement the NEW items' stock, inside the same transaction as the save.
+            // Pending orders never had stock decremented, so item edits on them correctly
+            // leave stock untouched.
+            if (STOCK_HELD_STATUSES.includes(order.orderStatus)) {
+                await updateProductStock(order.orderItems, "increase", session);
+                await updateProductStock(newOrderItems, "decrease", session);
+            }
+
+            order.orderItems = newOrderItems;
         }
 
-        // Update pricing
         if (shippingPrice !== undefined) {
             order.shippingPrice = parseFloat(shippingPrice) || 0;
-            console.log("Shipping price updated:", order.shippingPrice);
         }
-
         if (taxPrice !== undefined) {
             order.taxPrice = parseFloat(taxPrice) || 0;
-            console.log("Tax price updated:", order.taxPrice);
         }
-
         if (discountAmount !== undefined) {
             order.discountAmount = parseFloat(discountAmount) || 0;
-            console.log("Discount amount updated:", order.discountAmount);
         }
         if (couponCode !== undefined) {
             order.couponCode = couponCode || undefined;
-            console.log("Coupon code updated:", order.couponCode);
         }
 
-        // Recalculate total price
-        const itemsTotal = order.orderItems.reduce((sum, item) => {
-            return sum + item.price * item.quantity;
-        }, 0);
-
+        // Recalculate total price (matches the itemsTotal + shipping + tax - discount
+        // convention used by pricingService.computeOrderTotals at order-creation time)
+        const itemsTotal = order.orderItems.reduce(
+            (sum, item) => sum + item.price * item.quantity,
+            0,
+        );
         order.totalPrice =
             itemsTotal + order.shippingPrice + order.taxPrice - (order.discountAmount || 0);
-        console.log("Total price recalculated:", order.totalPrice);
 
-        // Add to status history
         order.statusHistory.push({
             status: order.orderStatus,
             note: note || "Order details updated by admin",
@@ -1141,20 +1088,20 @@ export const updateOrderDetails = async (req, res, next) => {
             updatedAt: new Date(),
         });
 
-        await order.save();
+        await order.save({ session, runValidators: true });
+        await session.commitTransaction();
 
-        // Populate for response
-        await order.populate("user", "name email");
-        await order.populate("statusHistory.updatedBy", "name");
-
-        console.log("Order updated successfully:", order.orderNumber);
+        const updatedOrder = await Order.findById(order._id)
+            .populate("user", "name email")
+            .populate("statusHistory.updatedBy", "name");
 
         res.status(200).json({
             success: true,
             message: "Order updated successfully",
-            order,
+            order: updatedOrder,
         });
     } catch (error) {
+        await session.abortTransaction();
         console.error("Order update error:", error);
 
         if (error.name === "CastError") {
@@ -1163,11 +1110,12 @@ export const updateOrderDetails = async (req, res, next) => {
                 message: "Invalid order ID",
             });
         }
-
         if (error.name === "ValidationError") {
+            const errors = Object.values(error.errors).map((err) => err.message);
             return res.status(400).json({
                 success: false,
-                message: error.message,
+                message: "Validation failed",
+                errors,
             });
         }
 
@@ -1175,5 +1123,7 @@ export const updateOrderDetails = async (req, res, next) => {
             success: false,
             message: "Server error: " + error.message,
         });
+    } finally {
+        session.endSession();
     }
 };

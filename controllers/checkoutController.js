@@ -1,16 +1,10 @@
 import Cart from "../models/Cart.js";
 import { CourierBranch, District, ShippingRate } from "../models/ShippingConfig.js";
 import {
-    applyCouponLogic as applyCouponLogicShared,
+    applyCouponLogic,
     calculateCODCharge,
     isHomeDeliveryOnly,
 } from "../services/pricingService.js";
-
-// Thin wrapper kept for this file's existing call signature (itemsToProcess
-// param no longer used inside — the shared service only needs subtotal/user —
-// left as a no-op parameter to avoid touching every call site below).
-const applyCouponLogic = async (couponCode, itemsSubtotal, itemsToProcess, userId) =>
-    applyCouponLogicShared(couponCode, itemsSubtotal, userId);
 
 // ─── Zone Helpers ─────────────────────────────────────────────────────────────
 
@@ -254,8 +248,8 @@ export const calculateCheckoutData = async (req, res, next) => {
             const couponResult = await applyCouponLogic(
                 couponCode.toUpperCase(),
                 itemsSubtotal,
-                itemsToProcess,
                 userId,
+                itemsToProcess,
             );
             discountAmount = couponResult.discountAmount;
             isFreeShippingByCoupon = couponResult.isFreeShipping;

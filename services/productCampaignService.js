@@ -1,6 +1,15 @@
 import Product from "../models/Product.js";
 import ProductCampaign from "../models/ProductCampaign.js";
-import mongoose from "mongoose";
+
+// Helper function for price calculation (copied from Product.js)
+function calculatePrice(basePrice, discountType, discountValue) {
+    if (discountType === "percentage") {
+        return Math.max(0, basePrice - (basePrice * discountValue) / 100);
+    } else if (discountType === "fixed") {
+        return Math.max(0, basePrice - discountValue);
+    }
+    return basePrice;
+}
 
 class ProductCampaignService {
     // Apply campaign discounts to products
@@ -15,7 +24,7 @@ class ProductCampaignService {
             originalDiscountValue: product.discountValue,
         };
 
-        // Calculate campaign price
+        // Calculate campaign price for main product
         const campaignPrice = campaign.calculateCampaignPrice(product.basePrice);
 
         // Apply campaign discount to product
@@ -42,6 +51,22 @@ class ProductCampaignService {
         product.isUnderCampaign = true;
         product.activeCampaignId = campaign._id;
 
+        // ✅ NEW: Apply campaign to variants
+        if (product.hasVariants && product.variants && product.variants.length > 0) {
+            product.variants = product.variants.map((variant) => {
+                const variantBasePrice = variant.basePrice || product.basePrice;
+
+                // Calculate campaign price for this variant
+                const variantCampaignPrice = campaign.calculateCampaignPrice(variantBasePrice);
+
+                return {
+                    ...variant,
+                    campaignPrice: variantCampaignPrice,
+                    price: variantCampaignPrice, // Update variant price
+                };
+            });
+        }
+
         await product.save();
 
         return {
@@ -67,6 +92,41 @@ class ProductCampaignService {
         product.isUnderCampaign = false;
         product.activeCampaignId = null;
         product.originalDiscount = {};
+
+        // ✅ NEW: Clear campaign from variants
+        if (product.hasVariants && product.variants && product.variants.length > 0) {
+            product.variants = product.variants.map((variant) => {
+                // Restore variant price using existing discount logic
+                let variantPrice = variant.basePrice || product.basePrice;
+
+                // Use variant discount if available
+                if (
+                    variant.discountType &&
+                    variant.discountType !== "none" &&
+                    variant.discountValue > 0
+                ) {
+                    variantPrice = calculatePrice(
+                        variant.basePrice || product.basePrice,
+                        variant.discountType,
+                        variant.discountValue,
+                    );
+                }
+                // Otherwise use product discount if available
+                else if (product.discountType !== "none" && product.discountValue > 0) {
+                    variantPrice = calculatePrice(
+                        variant.basePrice || product.basePrice,
+                        product.discountType,
+                        product.discountValue,
+                    );
+                }
+
+                return {
+                    ...variant,
+                    campaignPrice: null, // Clear campaign price
+                    price: variantPrice,
+                };
+            });
+        }
 
         await product.save();
 
@@ -106,13 +166,6 @@ class ProductCampaignService {
                 const result = await this.applyCampaignToProduct(productId, campaign);
                 if (result) {
                     results.push(result);
-                    // campaign.affectedProducts.push({
-                    //   productId: productId,
-                    //   originalPrice: result.originalData.originalPrice,
-                    //   originalDiscountType: result.originalData.originalDiscountType,
-                    //   originalDiscountValue: result.originalData.originalDiscountValue,
-                    //   campaignPrice: result.campaignPrice,
-                    // });
                 }
             } catch (error) {
                 console.error(`Error applying campaign to product ${productId}:`, error);
@@ -122,7 +175,9 @@ class ProductCampaignService {
         campaign.lastAppliedAt = new Date();
         await campaign.save();
 
+        // ✅ FIX: Added name field
         return {
+            name: campaign.name, // ← যোগ করতে হবে
             campaignId: campaign._id,
             totalProducts: eligibleProductIds.length,
             appliedProducts: results.length,
@@ -131,37 +186,6 @@ class ProductCampaignService {
     }
 
     // Rollback a campaign (when campaign ends)
-    // static async rollbackCampaign(campaignId) {
-    //   const campaign = await ProductCampaign.findById(campaignId);
-    //   if (!campaign) {
-    //     throw new Error("Campaign not found");
-    //   }
-
-    //   const results = [];
-
-    //   for (const affected of campaign.affectedProducts) {
-    //     try {
-    //       const product = await Product.findById(affected.productId);
-    //       if (product && product.activeCampaignId?.toString() === campaignId.toString()) {
-    //         await this.rollbackCampaignFromProduct(affected.productId);
-    //         results.push(affected.productId);
-    //       }
-    //     } catch (error) {
-    //       console.error(`Error rolling back product ${affected.productId}:`, error);
-    //     }
-    //   }
-
-    //   campaign.isActive = false;
-    //   campaign.rolledBackAt = new Date();
-    //   await campaign.save();
-
-    //   return {
-    //     campaignId: campaign._id,
-    //     rolledBackProducts: results.length,
-    //     results,
-    //   };
-    // }
-
     static async rollbackCampaign(campaignId) {
         const campaign = await ProductCampaign.findById(campaignId);
         if (!campaign) throw new Error("Campaign not found");
@@ -185,7 +209,9 @@ class ProductCampaignService {
         campaign.rolledBackAt = new Date();
         await campaign.save();
 
+        // ✅ FIX: Added name field
         return {
+            name: campaign.name, // ← যোগ করতে হবে
             campaignId: campaign._id,
             rolledBackProducts: results.length,
             results,

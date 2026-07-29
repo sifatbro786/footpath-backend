@@ -10,6 +10,8 @@
 // This service is now the single source of truth for these calculations,
 // used by BOTH the checkout preview and actual order creation.
 import Coupon from "../models/Coupon.js";
+import Order from "../models/Order.js";
+import Product from "../models/Product.js";
 import { ShippingRate } from "../models/ShippingConfig.js";
 
 export const isHomeDeliveryOnly = (locationType) =>
@@ -25,10 +27,71 @@ export const calculateCODCharge = (rateDoc, orderAmountAfterDiscount) => {
 };
 
 /**
+ * Computes how much of the cart a coupon with appliesTo="products"/"categories"
+ * restrictions actually applies to. `items` accepts any of the three shapes that
+ * exist in this codebase: populated Cart subdocs (item.product is a full Product
+ * doc), guest checkout items ({productId, price, quantity}), or order items
+ * ({product: ObjectId, price, quantity}). Category is looked up from the DB for
+ * any item that isn't already populated — never trusted from client input.
+ */
+const getEligibleAmount = async (coupon, items, fallbackAmount) => {
+    if (coupon.appliesTo === "all" || !Array.isArray(items) || items.length === 0) {
+        return fallbackAmount;
+    }
+
+    const normalized = items
+        .map((item) => {
+            const productDoc =
+                item.product && typeof item.product === "object" ? item.product : null;
+            const productId = (productDoc?._id || item.product || item.productId)?.toString();
+            const category = productDoc?.category ? productDoc.category.toString() : undefined;
+            const amount =
+                parseFloat(item.priceAtPurchase ?? item.price ?? 0) * (item.quantity || 1);
+            return { productId, category, amount };
+        })
+        .filter((i) => i.productId);
+
+    if (coupon.appliesTo === "products") {
+        const allowed = new Set(coupon.productRestrictions.map((id) => id.toString()));
+        return normalized.reduce((sum, i) => sum + (allowed.has(i.productId) ? i.amount : 0), 0);
+    }
+
+    if (coupon.appliesTo === "categories") {
+        const allowed = new Set(coupon.categoryRestrictions.map((id) => id.toString()));
+        const missingCategoryIds = normalized
+            .filter((i) => i.category === undefined)
+            .map((i) => i.productId);
+
+        if (missingCategoryIds.length > 0) {
+            const products = await Product.find({ _id: { $in: missingCategoryIds } }).select(
+                "category",
+            );
+            const categoryByProduct = new Map(
+                products.map((p) => [p._id.toString(), p.category?.toString()]),
+            );
+            normalized.forEach((i) => {
+                if (i.category === undefined) i.category = categoryByProduct.get(i.productId);
+            });
+        }
+
+        return normalized.reduce(
+            (sum, i) => sum + (i.category && allowed.has(i.category) ? i.amount : 0),
+            0,
+        );
+    }
+
+    return fallbackAmount;
+};
+
+/**
  * Validates a coupon code server-side and returns the discount that actually
  * applies. Never trust a client-supplied discountAmount — always recompute.
+ * `items` (optional) enables appliesTo="products"/"categories" restriction
+ * checking — see getEligibleAmount above. Falls back to treating the whole
+ * itemsSubtotal as eligible when omitted (only safe for appliesTo="all" coupons;
+ * callers passing a restricted coupon MUST pass items).
  */
-export const applyCouponLogic = async (couponCode, itemsSubtotal, userId) => {
+export const applyCouponLogic = async (couponCode, itemsSubtotal, userId, items = []) => {
     let discountAmount = 0;
     let isFreeShipping = false;
 
@@ -61,6 +124,26 @@ export const applyCouponLogic = async (couponCode, itemsSubtotal, userId) => {
         return { discountAmount, isFreeShipping, validationMessage: "Coupon usage limit reached" };
     }
 
+    // FIX: `usagePerCustomer` is a real schema field (shown in the admin UI as
+    // "Usage Per Customer") but was never enforced anywhere in the codebase — every
+    // coupon was effectively unlimited-per-customer regardless of this setting.
+    // Cancelled/Refunded orders don't count against the limit (the coupon was never
+    // successfully used on them).
+    if (userId && coupon.usagePerCustomer > 0) {
+        const customerUsageCount = await Order.countDocuments({
+            user: userId,
+            couponCode: coupon.code,
+            orderStatus: { $nin: ["Cancelled", "Refunded"] },
+        });
+        if (customerUsageCount >= coupon.usagePerCustomer) {
+            return {
+                discountAmount,
+                isFreeShipping,
+                validationMessage: "You have already used this coupon the maximum number of times",
+            };
+        }
+    }
+
     if (itemsSubtotal < coupon.minOrderAmount) {
         return {
             discountAmount,
@@ -69,8 +152,27 @@ export const applyCouponLogic = async (couponCode, itemsSubtotal, userId) => {
         };
     }
 
+    // FIX (critical, price-tampering-adjacent): appliesTo="products"/"categories"
+    // restrictions were only validated in the standalone preview endpoint
+    // (couponController.applyCoupon, POST /api/coupons/apply) and silently ignored by
+    // the actual pricing path — checkoutController.js called this function with only a
+    // subtotal number via a documented no-op wrapper, and orderController.js's
+    // createOrder never passed restriction info at all. A coupon restricted to one
+    // category discounted the customer's ENTIRE cart at both checkout-preview and
+    // real order-creation time. Eligibility is now computed here from real
+    // Product.category values — see getEligibleAmount above.
+    const eligibleAmount = await getEligibleAmount(coupon, items, itemsSubtotal);
+
+    if (coupon.appliesTo !== "all" && eligibleAmount <= 0) {
+        return {
+            discountAmount,
+            isFreeShipping,
+            validationMessage: "Coupon is not applicable to any items in your cart",
+        };
+    }
+
     if (coupon.couponType === "percentage") {
-        discountAmount = itemsSubtotal * (coupon.value / 100);
+        discountAmount = eligibleAmount * (coupon.value / 100);
         if (coupon.maxDiscountAmount && discountAmount > coupon.maxDiscountAmount) {
             discountAmount = coupon.maxDiscountAmount;
         }
@@ -84,8 +186,11 @@ export const applyCouponLogic = async (couponCode, itemsSubtotal, userId) => {
         discountAmount = 0;
     }
 
-    if (discountAmount > itemsSubtotal) {
-        discountAmount = itemsSubtotal;
+    // FIX: was clamped against itemsSubtotal (the whole cart) instead of
+    // eligibleAmount (what the coupon can actually touch) — a coupon restricted to a
+    // ৳10 item inside a ৳1,000 cart could discount up to ৳1,000 instead of ৳10.
+    if (discountAmount > eligibleAmount) {
+        discountAmount = eligibleAmount;
     }
 
     return {
@@ -164,10 +269,11 @@ export const computeOrderTotals = async ({
     locationType,
     deliveryType,
     isCOD,
+    items = [],
 }) => {
     const taxRate = parseFloat(process.env.VAT_RATE) || 0;
 
-    const couponResult = await applyCouponLogic(couponCode, itemsSubtotal, userId);
+    const couponResult = await applyCouponLogic(couponCode, itemsSubtotal, userId, items);
     if (couponCode && couponResult.validationMessage !== "Coupon applied successfully") {
         return { ok: false, status: 400, message: couponResult.validationMessage };
     }
