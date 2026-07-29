@@ -2,6 +2,9 @@
 // Extracted from the old root-level "pageMeta.js" (which mixed router + logic).
 import PageMeta from "../models/PageMeta.js";
 
+// Create a new page
+// Route: POST /api/pageMeta
+// Access: Admin
 export const createPageMeta = async (req, res) => {
     try {
         const { pageName, metaTitle, metaDescription, metaKeywords, canonicalUrl, lastUpdatedBy } =
@@ -64,6 +67,9 @@ export const createPageMeta = async (req, res) => {
     }
 };
 
+// Get all page meta
+// Route: GET /api/pageMeta
+// Access: Admin
 export const getAllPageMeta = async (req, res) => {
     try {
         const pageMeta = await PageMeta.find().sort({ pageName: 1 }).select("-__v");
@@ -83,6 +89,9 @@ export const getAllPageMeta = async (req, res) => {
     }
 };
 
+// Get page meta by slug
+// Route: GET /api/pageMeta/:slug
+// Access: Admin
 export const getPageMetaBySlug = async (req, res) => {
     try {
         const pageMeta = await PageMeta.findOne({
@@ -117,7 +126,9 @@ export const getPageMetaBySlug = async (req, res) => {
     }
 };
 
-
+// Update page meta
+// Route: PUT /api/pageMeta/:id
+// Access: Admin
 export const updatePageMeta = async (req, res) => {
     try {
         const {
@@ -199,6 +210,9 @@ export const updatePageMeta = async (req, res) => {
     }
 };
 
+// Delete page meta
+// Route: DELETE /api/pageMeta/:id
+// Access: Admin
 export const deletePageMeta = async (req, res) => {
     try {
         const deletedPageMeta = await PageMeta.findByIdAndDelete(req.params.id);
@@ -230,6 +244,9 @@ export const deletePageMeta = async (req, res) => {
     }
 };
 
+// Toggle page meta status
+// Route: PATCH /api/pageMeta/:id/toggle
+// Access: Admin
 export const togglePageMetaStatus = async (req, res) => {
     try {
         const pageMeta = await PageMeta.findById(req.params.id);
@@ -266,14 +283,17 @@ export const togglePageMetaStatus = async (req, res) => {
     }
 };
 
+// Bulk update page meta
+// Route: PATCH /api/pageMeta/bulk-update
+// Access: Admin
 export const bulkUpdatePageMeta = async (req, res) => {
     try {
         const { pages } = req.body;
 
-        if (!Array.isArray(pages)) {
+        if (!Array.isArray(pages) || pages.length === 0) {
             return res.status(400).json({
                 success: false,
-                message: "Pages array is required",
+                message: "A non-empty pages array is required",
             });
         }
 

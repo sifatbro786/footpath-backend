@@ -60,19 +60,20 @@ pageMetaSchema.pre("save", function (next) {
 });
 
 pageMetaSchema.pre("findOneAndUpdate", function (next) {
-    const update = this.getUpdate();
-
-    if (update.pageName) {
-        const slug = update.pageName
+    const update = this.getUpdate() || {};
+    // The controller sends { $set: { pageName, ... } }, so pageName lives under
+    // $set — not at the top level. Support both shapes, otherwise renaming a
+    // page never regenerates its slug and the old slug stays resolvable.
+    const nextName = update.pageName ?? update.$set?.pageName;
+    if (nextName) {
+        const slug = nextName
             .toLowerCase()
             .replace(/[^a-zA-Z0-9]/g, "-")
             .replace(/-+/g, "-")
             .replace(/^-|-$/g, "");
-
-        this.setUpdate({
-            ...update,
-            pageSlug: slug,
-        });
+        if (update.$set) update.$set.pageSlug = slug;
+        else update.pageSlug = slug;
+        this.setUpdate(update);
     }
     next();
 });
