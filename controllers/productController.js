@@ -19,34 +19,6 @@ const calculatePrice = (basePrice, discountType, discountValue) => {
     return base;
 };
 
-const getFinalProductPrice = (product) => {
-    // Check if product is under active campaign
-    if (product.isUnderCampaign && product.campaignDiscount?.isActive) {
-        const now = new Date();
-        const campaignEndDate = new Date(product.campaignDiscount.endDate);
-        const campaignStartDate = new Date(product.campaignDiscount.startDate);
-
-        if (campaignStartDate <= now && campaignEndDate >= now) {
-            return {
-                price: product.campaignDiscount.campaignPrice,
-                discountType: product.campaignDiscount.discountType,
-                discountValue: product.campaignDiscount.discountValue,
-                isFromCampaign: true,
-                campaignName: product.campaignDiscount.campaignName,
-                campaignId: product.campaignDiscount.campaignId,
-            };
-        }
-    }
-
-    // Otherwise use product's own discount
-    return {
-        price: product.price,
-        discountType: product.discountType,
-        discountValue: product.discountValue,
-        isFromCampaign: false,
-    };
-};
-
 export const createProduct = async (req, res) => {
     try {
         console.log("Received product data:", req.body);
@@ -2451,17 +2423,21 @@ export const createDynamicSection = async (req, res) => {
             textColor = "#000000",
         } = req.body;
 
-        // Check if similar section already exists
+        // Check if a section with the same attribute pair already exists.
+        // FIX: previously only guarded against active duplicates — an inactive
+        // section with the same key/value let a second (active) twin be
+        // created, producing duplicate homepage sections once re-enabled.
         const existingSection = await DynamicSection.findOne({
             attributeKey,
             attributeValue,
-            isActive: true,
         });
 
         if (existingSection) {
             return res.status(400).json({
                 success: false,
-                message: "A section with this attribute already exists",
+                message: existingSection.isActive
+                    ? "A section with this attribute already exists"
+                    : "A deactivated section with this attribute already exists — edit or reactivate it instead",
             });
         }
 
@@ -2568,13 +2544,36 @@ export const getAllDynamicSections = async (req, res) => {
             .populate("createdBy", "name email")
             .sort({ displayOrder: 1, createdAt: -1 })
             .limit(limit * 1)
-            .skip((page - 1) * limit);
+            .skip((page - 1) * limit)
+            .lean();
 
         const total = await DynamicSection.countDocuments(filter);
 
+        // Attach the live matched-product count per section so the admin list
+        // can show "N products" without an N+1 round-trip from the client.
+        // Mirrors the exact filter the storefront uses in
+        // getProductsForDynamicSection (attribute-based → attributes elemMatch).
+        const sectionsWithCount = await Promise.all(
+            sections.map(async (section) => {
+                const productFilter = { isActive: true };
+                if (section.sectionType === "attribute-based") {
+                    productFilter.attributes = {
+                        $elemMatch: {
+                            key: section.attributeKey,
+                            value: section.attributeValue,
+                        },
+                    };
+                } else if (section.sectionType === "manual") {
+                    productFilter._id = { $in: section.customProducts || [] };
+                }
+                const matchedProducts = await Product.countDocuments(productFilter);
+                return { ...section, matchedProducts };
+            }),
+        );
+
         res.status(200).json({
             success: true,
-            sections,
+            sections: sectionsWithCount,
             totalPages: Math.ceil(total / limit),
             currentPage: Number(page),
             total,
