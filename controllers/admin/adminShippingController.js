@@ -1,5 +1,6 @@
 // controllers/admin.shippingController.js
 import { CourierBranch, District, ShippingRate } from "../../models/ShippingConfig.js";
+import { isHomeDeliveryOnly } from "../../services/pricingService.js";
 
 // ==================== DISTRICTS ====================
 
@@ -286,6 +287,17 @@ export const createShippingRate = async (req, res) => {
             });
         }
 
+        // Dhaka Inside / Dhaka Sub are Home Delivery only — same rule checkout
+        // enforces via isHomeDeliveryOnly. Without this guard an admin could
+        // create a (dhaka_inside, Courier) rate that checkout would simply
+        // never look up, silently orphaning it.
+        if (deliveryType === "Courier" && isHomeDeliveryOnly(locationType)) {
+            return res.status(400).json({
+                success: false,
+                message: `Courier is not available for ${locationType}. Only Home Delivery is supported for this zone.`,
+            });
+        }
+
         const exists = await ShippingRate.findOne({ locationType, deliveryType });
         if (exists) {
             return res.status(400).json({
@@ -344,12 +356,6 @@ export const updateShippingRate = async (req, res) => {
             rate.reducedShippingThreshold = reducedShippingThreshold;
         if (reducedShippingAmount !== undefined) rate.reducedShippingAmount = reducedShippingAmount;
         if (isActive !== undefined) rate.isActive = isActive;
-
-        if (rate.codChargeType === "percentage") {
-            rate.codCharge = rate.codChargeValue;
-        } else {
-            rate.codCharge = rate.codChargeValue;
-        }
 
         await rate.save();
 

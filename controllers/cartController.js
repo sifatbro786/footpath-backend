@@ -1,5 +1,7 @@
+import Campaign from "../models/Campaign.js";
 import Cart from "../models/Cart.js";
 import Product from "../models/Product.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 
 export const getCart = async (req, res, next) => {
     if (!req.user || !req.user.id) {
@@ -13,11 +15,13 @@ export const getCart = async (req, res, next) => {
             path: "items.product",
             select: "name slug imageGroups variants hasVariants price basePrice discountPercentage stockStatus isActive",
         });
+
         if (!cart) {
             const newCart = await Cart.create({ user: req.user.id, items: [] });
+
+            // ✅ FIX: Static import ব্যবহার করছি, dynamic import সরানো হয়েছে
             let activeCampaigns = [];
             try {
-                const Campaign = (await import("../models/Campaign.js")).default;
                 activeCampaigns = await Campaign.find({
                     user: req.user.id,
                     status: "active",
@@ -26,8 +30,9 @@ export const getCart = async (req, res, next) => {
                     .populate("promotion")
                     .populate("cartItems.product");
             } catch (campaignError) {
-                console.log("⚠️ Campaign model not available yet");
+                console.log("⚠️ Campaign model error:", campaignError.message);
             }
+
             return res.status(200).json({
                 success: true,
                 cart: newCart,
@@ -37,6 +42,7 @@ export const getCart = async (req, res, next) => {
 
         let isCartModified = false;
         const itemsToKeep = [];
+
         for (const item of cart.items) {
             const product = item.product;
             if (!product || product.isActive === false) {
@@ -55,9 +61,16 @@ export const getCart = async (req, res, next) => {
 
             let livePrice = product.price || 0;
 
-            let currentItemPrice = item.priceAtPurchase || 0;
-            if (product.hasVariants && item.variant?.sku) {
-                const liveVariant = product.variants.find((v) => v.sku === item.variant.sku);
+            // ✅ FIX: SKU এর বদলে options দিয়ে variant match করা হচ্ছে
+            if (product.hasVariants && item.variant?.options?.length) {
+                const liveVariant = product.variants.find((v) =>
+                    item.variant.options.every((opt) =>
+                        v.options.some(
+                            (vOpt) => vOpt.name === opt.name && vOpt.value === opt.value,
+                        ),
+                    ),
+                );
+
                 if (liveVariant) {
                     livePrice = liveVariant.price || 0;
                     if (liveVariant.stockStatus === "out_of_stock") {
@@ -75,6 +88,8 @@ export const getCart = async (req, res, next) => {
                     continue;
                 }
             }
+
+            let currentItemPrice = item.priceAtPurchase || 0;
             if ((currentItemPrice ?? 0).toFixed(2) !== (livePrice ?? 0).toFixed(2)) {
                 console.log(
                     `💰 Price updated for ${product.name}: ${currentItemPrice} → ${livePrice}`,
@@ -85,6 +100,7 @@ export const getCart = async (req, res, next) => {
 
             itemsToKeep.push(item);
         }
+
         if (isCartModified) {
             cart.items = itemsToKeep;
             let newTotalPrice = cart.items.reduce(
@@ -100,10 +116,9 @@ export const getCart = async (req, res, next) => {
             });
         }
 
+        // ✅ FIX: Static import ব্যবহার করছি, dynamic import সরানো হয়েছে
         let activeCampaigns = [];
         try {
-            const Campaign = (await import("../models/Campaign.js")).default;
-            const Promotion = (await import("../models/promotion.model.js")).default;
             activeCampaigns = await Campaign.find({
                 user: req.user.id,
                 status: "active",
@@ -113,7 +128,7 @@ export const getCart = async (req, res, next) => {
                 .populate("cartItems.product", "name slug imageGroups price");
             console.log(`🎁 Found ${activeCampaigns.length} active campaigns for user`);
         } catch (campaignError) {
-            console.log("⚠️ Campaign/Promotion models not available yet:", campaignError.message);
+            console.log("⚠️ Campaign model error:", campaignError.message);
         }
 
         let finalCart = cart.toObject();
@@ -188,9 +203,9 @@ export const getCart = async (req, res, next) => {
                     }
                 }
             }
-        } // ফাইনাল প্রাইস ক্যালকুলেশন
+        }
 
-        const finalTotalPrice = Math.max(0, finalCart.totalPrice - totalDiscount); // 8. আপডেট হওয়া বা যাচাই করা কার্ট ফ্রন্টএন্ডে পাঠানো
+        const finalTotalPrice = Math.max(0, finalCart.totalPrice - totalDiscount);
 
         res.status(200).json({
             success: true,
@@ -205,26 +220,21 @@ export const getCart = async (req, res, next) => {
                     : "Cart loaded successfully",
         });
     } catch (error) {
-        console.error("❌ Cart Controller getCart Error:", error); // General server error handling
+        console.error("❌ Cart Controller getCart Error:", error);
         next(error);
     }
 };
 
-// @desc    Add item to cart
-// @route   POST /api/cart
-// @access  Private (protect middleware ensures req.user exists)
+// @desc    Add item to cart
+// @route   POST /api/cart
+// @access  Private
 export const addItemToCart = async (req, res, next) => {
-    // FIX (critical, price-tampering): `finalPrice`, `basePrice`, and
-    // `discountPercentage` used to be read straight from the client and trusted
-    // (`finalPrice || product.price`) — a client could send any price it wanted.
-    // That price becomes `priceAtPurchase` and flows directly into order totals
-    // later. Price is now ALWAYS derived server-side from the Product/variant
-    // record; any price fields sent by the client are ignored.
     const { productId, quantity, variant } = req.body;
 
     console.log("🛒 Cart Controller - Add Item Request:");
     console.log("User ID:", req.user?.id);
     console.log("Request Body:", req.body);
+
     if (!req.user || !req.user.id) {
         return res.status(401).json({
             success: false,
@@ -293,7 +303,6 @@ export const addItemToCart = async (req, res, next) => {
             priceToUse = product.price || product.basePrice || 0;
         }
 
-        // FIX: stock check on add — was previously not validated at all.
         if (availableStock !== undefined && qty > availableStock) {
             return res.status(400).json({
                 success: false,
@@ -330,14 +339,11 @@ export const addItemToCart = async (req, res, next) => {
                   }
                 : null,
         };
+
         const existingItem = cart.items.find((item) => {
             if (item.product.toString() !== productId) return false;
             if (!item.variant && !variantData) return true;
             if (!item.variant || !variantData) return false;
-            // FIX: variant matching is now options-only. `variantId` was always
-            // undefined (Product variant subdocuments don't have their own _id —
-            // see product_model.js), so that branch never actually ran; removed
-            // for clarity instead of leaving dead code that looked load-bearing.
             if (item.variant.options && variantData.options) {
                 const itemOptions = JSON.stringify(
                     item.variant.options.sort((a, b) => a.name.localeCompare(b.name)),
@@ -367,12 +373,14 @@ export const addItemToCart = async (req, res, next) => {
             cart.items.push(newItem);
             console.log("New item added to cart");
         }
+
         await cart.save();
         cart = await Cart.findById(cart._id).populate(
             "items.product",
             "name slug imageGroups variants hasVariants",
         );
         console.log("Cart saved successfully, total items:", cart.items.length);
+
         res.status(200).json({
             success: true,
             message: "Product added to your cart successfully.",
@@ -390,36 +398,41 @@ export const addItemToCart = async (req, res, next) => {
     }
 };
 
-// @desc    Update item quantity in cart
-// @route   PUT /api/cart/:itemId
-// @access  Private
+// @desc    Update item quantity in cart
+// @route   PUT /api/cart/:itemId
+// @access  Private
 export const updateCartItem = async (req, res, next) => {
-    const { quantity } = req.body; // Debugging
+    const { quantity } = req.body;
     console.log("Update Cart Item ID:", req.params.itemId);
     console.log("Requested Quantity:", quantity);
+
     if (!req.user || !req.user.id) {
         return res.status(401).json({
             success: false,
             message: "Not authorized.",
         });
     }
+
     if (quantity < 1) {
         return res.status(400).json({
             success: false,
             message: "Quantity must be at least 1. Use DELETE to remove item.",
         });
     }
+
     try {
         const cart = await Cart.findOne({ user: req.user.id }).populate(
             "items.product",
             "stock variants hasVariants",
         );
+
         if (!cart) {
             return res.status(404).json({
                 success: false,
                 message: "Cart not found",
             });
         }
+
         const item = cart.items.id(req.params.itemId);
         if (!item) {
             return res.status(404).json({
@@ -428,13 +441,19 @@ export const updateCartItem = async (req, res, next) => {
             });
         }
 
-        // FIX: check requested quantity against real stock before saving
+        // ✅ FIX: SKU এর বদলে options দিয়ে variant match করা হচ্ছে
         const product = item.product;
         let availableStock = product?.stock;
-        if (product?.hasVariants && item.variant?.sku) {
-            const variantItem = product.variants.find((v) => v.sku === item.variant.sku);
+
+        if (product?.hasVariants && item.variant?.options?.length) {
+            const variantItem = product.variants.find((v) =>
+                item.variant.options.every((opt) =>
+                    v.options.some((vOpt) => vOpt.name === opt.name && vOpt.value === opt.value),
+                ),
+            );
             if (variantItem) availableStock = variantItem.stock;
         }
+
         if (availableStock !== undefined && quantity > availableStock) {
             return res.status(400).json({
                 success: false,
@@ -445,9 +464,10 @@ export const updateCartItem = async (req, res, next) => {
         item.quantity = quantity;
         await cart.save();
         await cart.populate("items.product", "name slug imageGroups variants hasVariants");
+
         res.status(200).json({ success: true, cart });
     } catch (error) {
-        console.error("art Controller Update Error:", error);
+        console.error("Cart Controller Update Error:", error);
         if (error.name === "ValidationError") {
             return res.status(400).json({
                 success: false,
@@ -458,26 +478,21 @@ export const updateCartItem = async (req, res, next) => {
     }
 };
 
-// @desc    Remove item from cart
-// @route   DELETE /api/cart/:itemId
-// @access  Private
-export const removeItemFromCart = async (req, res, next) => {
-    if (!req.user || !req.user.id) {
-        return res.status(401).json({
-            success: false,
-            message: "Not authorized.",
-        });
+// @desc    Remove item from cart
+// @route   DELETE /api/cart/:itemId
+// @access  Private
+export const removeItemFromCart = asyncHandler(async (req, res) => {
+    if (!req.user?.id) {
+        return res.status(401).json({ success: false, message: "Not authorized." });
     }
+
     const cart = await Cart.findOne({ user: req.user.id });
     if (!cart) {
-        return res.status(404).json({
-            success: false,
-            message: "Cart not found",
-        });
+        return res.status(404).json({ success: false, message: "Cart not found" });
     }
 
     cart.items.pull({ _id: req.params.itemId });
     await cart.save();
     await cart.populate("items.product", "name slug imageGroups variants hasVariants");
     res.status(200).json({ success: true, cart });
-};
+});

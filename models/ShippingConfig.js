@@ -61,11 +61,11 @@ const shippingRateSchema = new mongoose.Schema(
 shippingRateSchema.index({ locationType: 1, deliveryType: 1 }, { unique: true });
 
 shippingRateSchema.pre("save", function (next) {
-    if (this.codChargeType === "fixed") {
-        this.codCharge = this.codChargeValue;
-    } else {
-        this.codCharge = this.codChargeValue;
-    }
+    // `codCharge` is a legacy display mirror of codChargeValue — it is NOT the
+    // resolved charge. Percentage rates only get resolved to an actual amount
+    // at checkout, in pricingService.calculateCODCharge (codChargeValue/100 *
+    // orderAmount). Do not read this field expecting a resolved percentage.
+    this.codCharge = this.codChargeValue;
     next();
 });
 

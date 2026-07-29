@@ -6,10 +6,10 @@ import Campaign from "../../models/Campaign.js";
 import { sendPromotionEmail } from "../../services/emailService.js";
 import { escapeRegex } from "../../utils/escapeRegex.js";
 
-// সব কার্ট ডেটা ফেচ করা
 export const getAllCarts = async (req, res, next) => {
     try {
-        const { page = 1, limit = 20, search = "" } = req.query;
+        // ✅ FIX: status added to query params
+        const { page = 1, limit = 20, search = "", status } = req.query;
 
         const query = {};
 
@@ -25,13 +25,21 @@ export const getAllCarts = async (req, res, next) => {
                         { email: { $regex: escapeRegex(search), $options: "i" } },
                     ],
                 }).select("_id"),
-                Product.find({ name: { $regex: escapeRegex(search), $options: "i" } }).select("_id"),
+                Product.find({ name: { $regex: escapeRegex(search), $options: "i" } }).select(
+                    "_id",
+                ),
             ]);
 
             query.$or = [
                 { user: { $in: matchingUsers.map((u) => u._id) } },
                 { "items.product": { $in: matchingProducts.map((p) => p._id) } },
             ];
+        }
+
+        // ✅ NEW: Server-side abandoned/active filter (2 hours threshold, matches getCartStats)
+        if (status === "abandoned" || status === "active") {
+            const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+            query.updatedAt = status === "abandoned" ? { $lt: twoHoursAgo } : { $gte: twoHoursAgo };
         }
 
         const carts = await Cart.find(query)
@@ -63,7 +71,6 @@ export const getAllCarts = async (req, res, next) => {
     }
 };
 
-// কার্ট স্ট্যাটিস্টিক্স
 export const getCartStats = async (req, res, next) => {
     try {
         const totalCarts = await Cart.countDocuments();
@@ -133,7 +140,6 @@ export const getCartStats = async (req, res, next) => {
     }
 };
 
-// অ্যাবানডন্ড কার্টস
 export const getAbandonedCarts = async (req, res, next) => {
     try {
         const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
@@ -168,7 +174,7 @@ export const createCampaign = async (req, res, next) => {
             discountValue,
             durationHours,
             minimumCartValue,
-            targetType, // frontend থেকে আসছে: 'abandoned_cart', 'all_users'
+            targetType, // frontend থেকে আসছে: 'abandoned_cart', 'all_users', 'specific_users'
             targetUsers,
         } = req.body;
 

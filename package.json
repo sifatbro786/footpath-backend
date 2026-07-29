@@ -7,6 +7,7 @@
         "start": "nodemon server.js",
         "dev": "nodemon server.js",
         "seed:shipping": "node scripts/seedShippingRates.js",
+        "seed:districts": "node scripts/seedDistricts.js",
         "test": "echo \"Error: no test specified\" && exit 1"
     },
     "keywords": [],
