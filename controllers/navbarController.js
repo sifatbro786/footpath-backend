@@ -32,29 +32,24 @@ export const getNavbarConfig = async (req, res) => {
 // Create or update navbar configuration
 export const updateNavbarConfig = async (req, res) => {
     try {
-        console.log("📦 Request Body:", JSON.stringify(req.body, null, 2));
-
         const { logo, logoUrl, items, cartIcon, searchIcon, userIcon, wishlistIcon } = req.body;
 
         let config = await NavbarConfig.findOne({ isActive: true });
-        console.log("🔍 Found existing config:", config ? "Yes" : "No");
 
         // Process items - generate paths based on type
         let processedItems = items;
         if (items && Array.isArray(items)) {
             processedItems = await Promise.all(
                 items.map(async (item) => {
-                    let cleanItem = { ...item };
+                    // ✅ FIX #3: _id is a String subdoc key (not ObjectId), so client-provided
+                    // "item-…" ids persist fine and stay stable across saves. Only
+                    // drop a blank/absent _id so Mongoose can generate one.
+                    const cleanItem = { ...item };
+                    if (!cleanItem._id) delete cleanItem._id;
 
-                    // Remove custom _id for new items to avoid ObjectId casting issues
-                    if (item._id && typeof item._id === "string" && item._id.startsWith("item-")) {
-                        const { _id, ...rest } = item;
-                        cleanItem = rest;
-                    }
-
-                    // Generate path based on item type
-                    if (cleanItem.type === "category" && cleanItem.category && !cleanItem.path) {
-                        // For categories, create path like /category/slug
+                    // ✅ FIX #2: Always regenerate path for category items (even if path exists)
+                    // This ensures changing category updates the link correctly
+                    if (cleanItem.type === "category" && cleanItem.category) {
                         try {
                             const categoryDoc = await Category.findById(cleanItem.category).select(
                                 "slug",
@@ -80,9 +75,9 @@ export const updateNavbarConfig = async (req, res) => {
 
         if (config) {
             // Update existing config
-            if (logo) config.logo = logo;
-            if (logoUrl) config.logoUrl = logoUrl;
-            if (processedItems) config.items = processedItems;
+            if (logo !== undefined) config.logo = logo;
+            if (logoUrl !== undefined) config.logoUrl = logoUrl;
+            if (processedItems !== undefined) config.items = processedItems;
             if (cartIcon !== undefined) config.cartIcon = cartIcon;
             if (searchIcon !== undefined) config.searchIcon = searchIcon;
             if (userIcon !== undefined) config.userIcon = userIcon;
@@ -91,7 +86,7 @@ export const updateNavbarConfig = async (req, res) => {
             // Create new config
             config = new NavbarConfig({
                 logo: logo || {
-                    url: "", // NOTE: was hardcoded to an unrelated news-site image URL — replace via admin panel with the real Footpath logo
+                    url: "",
                     public_id: "",
                 },
                 logoUrl: logoUrl || "/",
@@ -103,12 +98,8 @@ export const updateNavbarConfig = async (req, res) => {
             });
         }
 
-        console.log("💾 Saving config...");
         await config.save();
-        console.log("✅ Config saved successfully");
-
         await config.populate("items.category", "name slug");
-        console.log("✅ Population completed");
 
         res.json({
             success: true,
@@ -116,11 +107,7 @@ export const updateNavbarConfig = async (req, res) => {
             data: config,
         });
     } catch (error) {
-        console.error("❌ Error in updateNavbarConfig:", error);
-        console.error("📋 Error details:", {
-            name: error.name,
-            message: error.message,
-        });
+        console.error("Error in updateNavbarConfig:", error);
 
         if (error.name === "ValidationError") {
             const errors = Object.values(error.errors).map((e) => e.message);
@@ -161,7 +148,7 @@ export const getAvailableCategories = async (req, res) => {
 const createDefaultConfig = async () => {
     const defaultConfig = new NavbarConfig({
         logo: {
-            url: "", // NOTE: was hardcoded to an unrelated news-site image URL — replace via admin panel with the real Footpath logo
+            url: "",
             public_id: "",
         },
         logoUrl: "/",
