@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import mongoose from "mongoose";
 import Cart from "../models/Cart.js";
 import Order from "../models/Order.js";
@@ -25,6 +26,38 @@ import { initializePayment } from "../config/sslcommerz.js";
 // behavior) incorrectly restores stock for orders that were still "Pending" and never
 // had stock removed in the first place, silently inflating inventory.
 const STOCK_HELD_STATUSES = ["Confirmed", "Processing", "Shipped", "Delivered", "Refunded"];
+
+const ADMIN_ROLES = ["admin", "executive"];
+
+// ─── Guest order access token helpers (Phase 0 — IDOR patch) ─────────────────
+
+/** 24 random bytes -> 48 hex chars. ~192 bits of entropy; not brute-forceable. */
+export const generateGuestAccessToken = () => crypto.randomBytes(24).toString("hex");
+
+/**
+ * Constant-time token comparison. A naive `a === b` leaks a byte-at-a-time
+ * timing oracle; with a public, unauthenticated endpoint that is a real (if
+ * slow) attack path, so compare via crypto.timingSafeEqual.
+ * Length is checked first because timingSafeEqual throws on length mismatch —
+ * that check is not itself sensitive, since token length is a public constant.
+ */
+const tokensMatch = (expected, provided) => {
+    if (typeof expected !== "string" || typeof provided !== "string") return false;
+    if (expected.length === 0 || expected.length !== provided.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
+};
+
+/**
+ * Strip the capability token before an order ever leaves the API. `select: false`
+ * already hides it on queries, but a freshly constructed document (createOrder)
+ * still carries it in memory and would serialize it into the response body.
+ */
+const toClientOrder = (orderDoc) => {
+    if (!orderDoc) return orderDoc;
+    const plain = typeof orderDoc.toObject === "function" ? orderDoc.toObject() : { ...orderDoc };
+    delete plain.guestAccessToken;
+    return plain;
+};
 
 // Product Stock Update
 export const updateProductStock = async (orderItems, action = "decrease", session = null) => {
@@ -281,6 +314,10 @@ export const createOrder = async (req, res, next) => {
             user: isGuest ? null : user,
             isGuest,
             guestEmail: isGuest ? guestEmail : null,
+            // Capability token so the guest can read back their own order without
+            // an account. Registered orders don't need one — ownership is proven
+            // by the JWT.
+            guestAccessToken: isGuest ? generateGuestAccessToken() : undefined,
             orderItems: finalOrderItems,
             shippingAddress: {
                 name: shippingAddress.name,
@@ -350,7 +387,10 @@ export const createOrder = async (req, res, next) => {
                 return res.status(201).json({
                     success: true,
                     message: "Payment initialized. Redirecting to gateway.",
-                    order: newOrder,
+                    order: toClientOrder(newOrder),
+                    // Surfaced once, at creation only. The client must persist this
+                    // to read the order back later; it is never returned again.
+                    guestAccessToken: isGuest ? newOrder.guestAccessToken : undefined,
                     redirectUrl: paymentInit.GatewayPageURL,
                 });
             } else {
@@ -421,7 +461,8 @@ export const createOrder = async (req, res, next) => {
                 return res.status(201).json({
                     success: true,
                     message: `COD order - Please pay ${codChargeAmount} BDT online`,
-                    order: newOrder,
+                    order: toClientOrder(newOrder),
+                    guestAccessToken: isGuest ? newOrder.guestAccessToken : undefined,
                     redirectUrl: paymentInit.GatewayPageURL,
                     codOnlinePaymentAmount: codChargeAmount,
                     remainingAmount: remainingAmount,
@@ -540,44 +581,59 @@ export const getMyOrders = async (req, res, next) => {
 // @access  Private/Public
 export const getOrderById = async (req, res, next) => {
     try {
-        console.log("Fetching order with ID:", req.params.id);
-        let order = await Order.findOne({ orderNumber: req.params.id })
+        const { id } = req.params;
+
+        // Accept the capability token from either the query string (the payment
+        // gateway round-trip can only carry it back as a URL param) or a header
+        // (preferred for XHR — keeps the token out of referrers and access logs).
+        const providedToken = String(req.query.token || req.headers["x-order-token"] || "");
+
+        // Lookup by orderNumber first, then by _id. findById is guarded by an
+        // ObjectId check so a non-ObjectId lookup key can't throw a CastError.
+        let order = await Order.findOne({ orderNumber: id })
+            .select("+guestAccessToken")
             .populate("user", "name email")
             .populate("statusHistory.updatedBy", "name");
-        if (!order) {
-            console.log("Trying to find by _id:", req.params.id);
-            order = await Order.findById(req.params.id)
+
+        if (!order && mongoose.isValidObjectId(id)) {
+            order = await Order.findById(id)
+                .select("+guestAccessToken")
                 .populate("user", "name email")
                 .populate("statusHistory.updatedBy", "name");
         }
+
         if (!order) {
-            console.log("Order not found for:", req.params.id);
             return res.status(404).json({
                 success: false,
                 message: "Order not found",
             });
         }
-        console.log("Order found:", order.orderNumber);
-        // Authorization check - Updated logic
-        if (order.isGuest) {
-            return res.status(200).json({ success: true, order });
-        }
-        // Registered user order
-        if (!req.user) {
-            return res.status(401).json({
-                success: false,
-                message: "Authentication required to view this order",
-            });
-        }
-        if (order.user && order.user._id.toString() !== req.user.id) {
-            return res.status(403).json({
+
+        // ─── Authorization ────────────────────────────────────────────────────
+        // SECURITY (Phase 0 — IDOR patch): a guest order used to be returned to
+        // anyone who could name it, exposing name, phone, email and full address.
+        // Access now requires proving one of three things.
+        const isAdmin = Boolean(req.user && ADMIN_ROLES.includes(req.user.role));
+        const isOwner = Boolean(
+            req.user && order.user && String(order.user._id) === String(req.user.id),
+        );
+        const hasValidToken = tokensMatch(order.guestAccessToken, providedToken);
+
+        if (!isAdmin && !isOwner && !hasValidToken) {
+            // Deliberately identical shape for "wrong token" and "not your order"
+            // so this endpoint can't be used to probe which order ids exist.
+            // Legacy guest orders created before this patch have no token stored
+            // and are therefore no longer publicly readable — that is the intended
+            // fail-closed behaviour; recover them through the admin endpoints.
+            return res.status(req.user ? 403 : 401).json({
                 success: false,
                 message: "Not authorized to view this order",
             });
         }
-        res.status(200).json({ success: true, order });
+
+        res.status(200).json({ success: true, order: toClientOrder(order) });
     } catch (error) {
-        console.error("Order fetch error:", error);
+        console.error("Order fetch error:", error.message);
         if (error.name === "CastError") {
             return res.status(404).json({
                 success: false,

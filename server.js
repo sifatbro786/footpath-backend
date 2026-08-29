@@ -1,9 +1,13 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import compression from "compression";
+import hpp from "hpp";
 import dotenv from "dotenv";
 import morgan from "morgan";
 import { errorHandler, notFound } from "./middlewares/errorMiddleware.js";
+import { sanitizeRequest } from "./middlewares/sanitize.js";
+import { globalApiLimiter } from "./middlewares/rateLimiter.js";
 
 // ============= PUBLIC / USER ROUTES =============
 import categoryRoutes from "./routes/categoryRoutes.js";
@@ -53,12 +57,33 @@ const __dirname = path.dirname(__filename);
 
 dotenv.config();
 const app = express();
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 const PORT = process.env.PORT || 5000;
 
 connectDB();
 
-app.use(helmet());
+// ═══ Middleware pipeline (Phase 0) ═══════════════════════════════════════════
+// Order is load-bearing. Read top to bottom:
+//   compression  – must wrap res.write/end before anything writes a response
+//   helmet       – security headers on every response, including static + errors
+//   static       – /uploads served after helmet so it inherits those headers
+//   cors         – must resolve before any route work, and before the limiter,
+//                  so a rejected preflight still gets correct CORS headers
+//   body parsers – populate req.body for the sanitiser below
+//   sanitize     – strips Mongo operators; ALSO re-defines req.query as a
+//                  writable property, which hpp depends on (see sanitize.js)
+//   hpp          – collapses duplicated params (?id=1&id=2 -> array attacks)
+//   limiter      – applied to /api only; static assets and /health stay free
+
+app.use(compression());
+
+app.use(helmet({
+    // /uploads is fetched cross-origin by the storefront (different port in dev,
+    // different domain in prod). Helmet's default CORP of "same-origin" makes
+    // browsers refuse those images.
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+}));
+
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // CORS origins are built from .env (CLIENT_URL / FRONTEND_URL) rather than
 // hardcoded — add Footpath's real domains there.
@@ -98,9 +123,26 @@ app.use(
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
+// NoSQL operator injection guard. Must precede hpp — see middlewares/sanitize.js
+// for why Express 5 needs a custom wrapper here.
+app.use(sanitizeRequest);
+
+// HTTP parameter pollution. `whitelist` names params that are legitimately
+// repeatable; everything else collapses to its last value so a handler can
+// never receive an unexpected array where it expects a string.
+app.use(
+    hpp({
+        whitelist: ["category", "attributes", "brand", "tags", "sort", "ids"],
+    }),
+);
+
 if (process.env.NODE_ENV !== "production") {
     app.use(morgan("dev"));
 }
+
+// Blanket rate limit for the API surface. Tighter per-route limiters (auth, OTP,
+// coupon) are mounted inside their own routers and stack on top of this.
+app.use("/api", globalApiLimiter);
 
 // ============= PUBLIC / USER ROUTES =============
 app.use(`/api/categories`, categoryRoutes);

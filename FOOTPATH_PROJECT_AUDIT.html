@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Footpath — Project Audit &amp; Roadmap</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#14161a; --muted:#5b6472; --line:#e3e7ec;
+    --card:#f7f9fb; --accent:#1f6feb; --ok:#0f7b46; --okbg:#e7f6ee;
+    --warn:#8a5a00; --warnbg:#fff5e0; --crit:#a31616; --critbg:#fdeaea;
+    --code:#f2f4f7; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f1216; --fg:#e6e9ee; --muted:#9aa4b2; --line:#242a33;
+      --card:#161a20; --accent:#589bff; --ok:#5ed19a; --okbg:#10261c;
+      --warn:#e8b64c; --warnbg:#2a2113; --crit:#ff8080; --critbg:#2c1414;
+      --code:#171b21;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans Bengali",sans-serif;}
+  .wrap{max-width:960px;margin:0 auto;padding:48px 24px 96px}
+  h1{font-size:2.1rem;line-height:1.2;margin:0 0 8px;letter-spacing:-.02em}
+  h2{font-size:1.45rem;margin:56px 0 16px;padding-bottom:8px;border-bottom:2px solid var(--line);letter-spacing:-.01em}
+  h3{font-size:1.1rem;margin:32px 0 10px}
+  h4{font-size:.95rem;margin:20px 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  p,li{color:var(--fg)}
+  .sub{color:var(--muted);margin:0 0 4px}
+  code{font-family:var(--mono);font-size:.86em;background:var(--code);padding:2px 5px;border-radius:4px}
+  ul,ol{padding-left:22px}
+  li{margin:5px 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:.92rem}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:.8rem;text-transform:uppercase;letter-spacing:.05em}
+  .scroll{overflow-x:auto}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:16px 0}
+  .tag{display:inline-block;font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:99px;letter-spacing:.04em;white-space:nowrap}
+  .t-crit{background:var(--critbg);color:var(--crit)}
+  .t-warn{background:var(--warnbg);color:var(--warn)}
+  .t-ok{background:var(--okbg);color:var(--ok)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:20px 0}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .stat b{display:block;font-size:1.7rem;line-height:1.2;letter-spacing:-.02em}
+  .stat span{font-size:.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .bar{height:8px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:8px}
+  .bar i{display:block;height:100%;background:var(--accent)}
+  .phase{border-left:3px solid var(--accent);padding-left:18px;margin:28px 0}
+  .phase .meta{font-size:.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px}
+  hr{border:0;border-top:1px solid var(--line);margin:40px 0}
+  .foot{color:var(--muted);font-size:.85rem;margin-top:64px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Footpath — Full Project Audit &amp; Roadmap</h1>
+<p class="sub">Stationery E-commerce · Express 5 + MongoDB/Mongoose · React 19 + Vite + Tailwind v4</p>
+<p class="sub">Audit date: 29 August 2026 · Repos: <code>footpath-backend</code>, <code>footpath-frontend</code></p>
+
+<h2>1. Ek Nojore (Executive Summary)</h2>
+
+<p>Backend ta <strong>onek beshi mature</strong> tomar frontend er tulonay. API layer prai production-ready — server-side pricing, Mongo transactions, atomic stock decrement with oversell guard, SSLCommerz validation-API verification, cron-driven campaign engine — eshob already ache. Frontend e <strong>admin dashboard ~85% done</strong>, kintu <strong>customer-facing storefront kar্যত 0%</strong> — HomePage ekta placeholder, ar cart/PDP/checkout/order pages ekdom nei.</p>
+
+<p>Tumi bolecho 60% — amar hisebe eta <strong>~58%</strong>, tobe distribution ta unequal: backend 85%, admin UI 82%, storefront 6%.</p>
+
+<div class="grid">
+  <div class="stat"><b>~58%</b><span>Overall</span><div class="bar"><i style="width:58%"></i></div></div>
+  <div class="stat"><b>85%</b><span>Backend API</span><div class="bar"><i style="width:85%"></i></div></div>
+  <div class="stat"><b>82%</b><span>Admin Dashboard</span><div class="bar"><i style="width:82%"></i></div></div>
+  <div class="stat"><b>6%</b><span>Storefront</span><div class="bar"><i style="width:6%"></i></div></div>
+</div>
+
+<div class="card">
+  <h4 style="margin-top:0">Sob theke boro 3 ta blocker</h4>
+  <ol style="margin-bottom:0">
+    <li><strong>Payment flow broken end-to-end.</strong> Backend <code>/order/success</code>, <code>/order/fail</code>, <code>/order/cancel</code> e redirect kore — frontend e ei 3 ta route <em>exist kore na</em>. Manush taka diye 404 dekhbe.</li>
+    <li><strong>Guest order IDOR.</strong> <code>GET /api/orders/:id</code> — guest order hole kono auth chara full PII (name, phone, email, address) return kore. Order number sequential (<code>ORD26082900001</code>) → enumerate kora trivial.</li>
+    <li><strong>Guest cart nei.</strong> Backend cart <code>protect</code>-only, kintu order guest support kore. Storefront e localStorage cart + merge-on-login banate hobe.</li>
+  </ol>
+</div>
+
+<h2>2. Ki Ki Kaj Hoye Geche</h2>
+
+<h3>2.1 Backend — ja ache</h3>
+
+<div class="scroll">
+<table>
+<thead><tr><th>Module</th><th>Ki ache</th><th>State</th></tr></thead>
+<tbody>
+<tr><td><strong>Auth</strong></td><td>Register, login, email OTP verify, resend, forgot/reset password (OTP hashed, 10-min expiry), JWT sign, logout, <code>/me</code>, profile update, shipping address book CRUD</td><td><span class="tag t-ok">Done</span></td></tr>
+<tr><td><strong>RBAC</strong></td><td><code>protect</code>, <code>optionalProtect</code>, <code>admin</code>, <code>authorize(...roles)</code>, <code>executiveOrAdmin</code>, <code>requireVerifiedEmail</code>, <code>requireActiveStatus</code>. 3 role: user / admin / executive</td><td><span class="tag t-ok">Done</span></td></tr>
+<tr><td><strong>Product</strong></td><td>Variants (options array), attributes, slug, SKU, discount, display order, view/purchase count, publishDate, SEO fields. <strong>16 index</strong> + text index (name/description/brand)</td><td><span class="tag t-ok">Done</span></td></tr>
+<tr><td><strong>Category</strong></td><td>Nested tree (parentCategory + level), image upload, active toggle, 3 index</td><td><span class="tag t-ok">Done</span></td></tr>
+<tr><td><strong>Cart</strong></td><td>User cart CRUD, variant matching by options array, auto totalPrice pre-save hook</td><td><span class="tag t-warn">Partial</span></td></tr>
+<tr><td><strong>Order</strong></td><td>Create (guest + user), <strong>server-side pricing</strong> via <code>pricingService.computeOrderTotals</code> (client theke kono price accept kore na), Mongo transaction, <strong>atomic stock decrement</strong> with <code>$gte</code> oversell guard, variant-aware stock, status history, admin notes, auto order number, stock reconcile on status transition</td><td><span class="tag t-ok">Done</span></td></tr>
+<tr><td><strong>Payment</strong></td><td>SSLCommerz init, <strong>mandatory validation-API verification</strong> (<code>val_id</code> + tran_id + amount match), IPN handler, success/fail/cancel redirect, COD partial online payment (codCharge / remainingAmount)</td><td><span class="tag t-ok">Done</span></td></tr>
+<tr><td><strong>Shipping</strong></td><td>District + upazila CRUD, courier branch management, rate matrix (<code>dhaka_inside</code> / <code>dhaka_sub</code> / <code>outside_dhaka</code> × Courier / Home Delivery), 2 ta seeder script</td><td><span class="tag t-ok">Done</span></td></tr>
+<tr><td><strong>Coupon</strong></td><td>Model + apply endpoint + usage increment + admin CRUD</td><td><span class="tag t-warn">Partial</span></td></tr>
+<tr><td><strong>Campaign</strong></td><td>ProductCampaign model, apply/rollback, <strong>node-cron every minute</strong> auto start/end, manual trigger, campaign products list</td><td><span class="tag t-ok">Done</span></td></tr>
+<tr><td><strong>Cart Campaign</strong></td><td>Abandoned cart detection, cart stats aggregation, campaign create, bulk promotional email</td><td><span class="tag t-ok">Done</span></td></tr>
+<tr><td><strong>Review</strong></td><td>Add/update/delete, moderation (pending/approved), unique per user+product, bulk demo review seeder, admin stats</td><td><span class="tag t-ok">Done</span></td></tr>
+<tr><td><strong>CMS</strong></td><td>Hero slides, Hero content, Navbar config, Offer popup, Page meta (SEO), A+ content (rich PDP blocks), Dynamic homepage sections</td><td><span class="tag t-ok">Done</span></td></tr>
+<tr><td><strong>Analytics</strong></td><td>Dashboard analytics, sales report, order stats aggregation</td><td><span class="tag t-ok">Done</span></td></tr>
+<tr><td><strong>Upload</strong></td><td>Multer + Cloudinary storage, single/multiple, category image, offer image</td><td><span class="tag t-ok">Done</span></td></tr>
+<tr><td><strong>Security</strong></td><td>helmet, CORS allowlist from env, bcrypt(10), express-validator rules, rate limit on auth (20/15m) + OTP (10/15m), central error middleware</td><td><span class="tag t-warn">Partial</span></td></tr>
+</tbody>
+</table>
+</div>
+
+<p><strong>Scale:</strong> 24 controller · 18 model · 40 route file · 3 service · 5 util · 5 middleware · 2 seeder. <code>server.js</code> e 33 ta router mount.</p>
+
+<h3>2.2 Frontend — ja ache</h3>
+
+<h4>Admin Dashboard (built)</h4>
+<ul>
+<li><strong>Dashboard</strong> — analytics + recharts</li>
+<li><strong>Products</strong> — list, form, view, variant editor, image manager, stock adjust modal, pricing helper, FAQ tips</li>
+<li><strong>Categories</strong> — tree table, form, image upload, status badge, confirm dialog</li>
+<li><strong>Orders</strong> — management list, detail page, details modal, order/payment status badges</li>
+<li><strong>Coupons</strong> · <strong>Campaigns</strong> — list + form</li>
+<li><strong>Cart Campaigns</strong> — 4 tab (overview / all carts / create campaign / cart details modal)</li>
+<li><strong>Shipping</strong> — 3 tab (districts / rates / courier branches) + rate modal + district card</li>
+<li><strong>Users</strong> (add staff modal) · <strong>Reviews</strong> (details modal)</li>
+<li><strong>Sections</strong> · <strong>Offers</strong> · <strong>Page Meta</strong> · <strong>Navbar Config</strong></li>
+<li><code>AdminLayout</code> + grouped nav config + auto-generated placeholder routes for unbuilt modules</li>
+</ul>
+
+<h4>Client / Storefront (built)</h4>
+<ul>
+<li>Login, Register, VerifyEmail (OTP), ForgotPassword, ResetPassword, Profile, NotFound</li>
+<li><code>FrontendLayout</code> — minimal header (logo + login/logout), no footer</li>
+<li><code>HomePage</code> — <strong>placeholder text only</strong></li>
+</ul>
+
+<h4>Infrastructure</h4>
+<ul>
+<li><code>axiosInstance</code> — Bearer token interceptor + global 401 → redirect to login</li>
+<li><code>AuthContext</code> + <code>useAuth</code>, <code>PrivateRoute</code> with <code>allowedRoles</code></li>
+<li>17 ta API module (adminApi, productApi, orderApi, couponApi, navbarApi, ...)</li>
+</ul>
+
+<h2>3. Bug &amp; Security Findings</h2>
+
+<h3>3.1 Critical</h3>
+
+<div class="card">
+<p><span class="tag t-crit">CRITICAL</span> &nbsp;<strong>C-1 · Guest order IDOR — full PII leak</strong></p>
+<p style="margin-bottom:6px"><code>controllers/orderController.js:562</code></p>
+<pre style="background:var(--code);padding:12px;border-radius:6px;overflow-x:auto;font-family:var(--mono);font-size:.82rem;margin:0 0 8px"><code>if (order.isGuest) {
+    return res.status(200).json({ success: true, order });  // ← no auth at all
+}</code></pre>
+<p style="margin-bottom:0">Order number generator sequential: <code>ORD + YY + MM + DD + 0001</code>. Keu <code>ORD26082900001</code> theke loop chalale sob guest order er name, phone, email, full address, order items peye jabe. <strong>Fix:</strong> guest order e ekta <code>accessToken</code> (crypto random, order e store) generate koro, success URL e pathao, ar <code>GET /:id</code> e <code>?token=</code> ba email/phone match require koro.</p>
+</div>
+
+<div class="card">
+<p><span class="tag t-crit">CRITICAL</span> &nbsp;<strong>C-2 · Payment redirect pages nei</strong></p>
+<p style="margin-bottom:0">Backend <code>${CLIENT_URL}/order/success?orderId=...</code>, <code>/order/fail</code>, <code>/order/cancel</code> e redirect kore. <code>AppRoute.jsx</code> e ei route gulo nei → <code>NotFoundPage</code>. Payment successful hoyeo user 404 dekhbe. <strong>Highest priority frontend task.</strong></p>
+</div>
+
+<div class="card">
+<p><span class="tag t-crit">CRITICAL</span> &nbsp;<strong>C-3 · <code>getMyOrders</code> guest e crash kore</strong></p>
+<p style="margin-bottom:0"><code>orderRoutes.js:8</code> e <code>optionalProtect</code> use kora, kintu <code>getMyOrders</code> e <code>req.user.id</code> — guest hole <code>TypeError</code> → 500. <strong>Fix:</strong> route ta <code>protect</code> koro.</p>
+</div>
+
+<h3>3.2 High</h3>
+
+<div class="scroll">
+<table>
+<thead><tr><th style="width:60px">ID</th><th>Issue</th><th>Fix</th></tr></thead>
+<tbody>
+<tr><td><strong>H-1</strong></td><td>Admin link admin-der kache dekhay na. <code>FrontendLayout.jsx:27</code> — <code>user?.role === "admin" || user?.role === "executive" &amp;&amp; (&lt;Link/&gt;)</code>. <code>&amp;&amp;</code> agey bind kore, tai admin hole expression <code>true</code> return kore ar React boolean render kore na.</td><td><code>(role === "admin" || role === "executive") &amp;&amp; (...)</code></td></tr>
+<tr><td><strong>H-2</strong></td><td>NoSQL operator injection. Kono <code>express-mongo-sanitize</code> / <code>hpp</code> nei. Query param e <code>?price[$ne]=</code> type payload direct query e jete pare.</td><td><code>express-mongo-sanitize</code> + <code>hpp</code> add koro (Express 5 e <code>req.query</code> immutable, tai custom middleware lagte pare)</td></tr>
+<tr><td><strong>H-3</strong></td><td><code>POST /api/coupons/apply</code> — no auth, no rate limit. Coupon code brute-force enumeration possible.</td><td><code>optionalProtect</code> + dedicated limiter (10/15m per IP)</td></tr>
+<tr><td><strong>H-4</strong></td><td>IPN e idempotency nei. SSLCommerz same IPN duibar pathale double-process hote pare.</td><td><code>paymentResult.id</code> / <code>val_id</code> unique index, already-processed hole early return</td></tr>
+<tr><td><strong>H-5</strong></td><td>Order model e <strong>kono index nei</strong> (<code>orderNumber</code> unique chara). Admin order list, analytics aggregation, <code>getMyOrders</code> — sob collection scan.</td><td><code>{user:1, createdAt:-1}</code>, <code>{orderStatus:1, createdAt:-1}</code>, <code>{paymentStatus:1}</code>, <code>{createdAt:-1}</code></td></tr>
+<tr><td><strong>H-6</strong></td><td>Global rate limiter nei — sudhu auth/OTP route e. <code>/api/products</code>, <code>/api/checkout/calculate</code> open.</td><td><code>app.use("/api", rateLimit({windowMs:60000, max:120}))</code></td></tr>
+<tr><td><strong>H-7</strong></td><td>Refresh token / revocation nei. JWT chura hole expiry porjonto valid. Logout server-side e kichu kore na.</td><td>Refresh token rotation, ba minimum <code>tokenVersion</code> field on User</td></tr>
+<tr><td><strong>H-8</strong></td><td>CORS: <code>if (!origin || origin === "null") return callback(null, true)</code> — origin-less request sob allow.</td><td>Production e <code>NODE_ENV</code> check kore ei bypass off koro</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>3.3 Medium</h3>
+
+<ul>
+<li><strong>M-1</strong> — <code>save({ validateBeforeSave: false })</code> payment flow er 8 jaygay. Schema validation bypass hocche exactly sei jaygay jekhane money involved.</li>
+<li><strong>M-2</strong> — Unused dependency: <code>pg</code> (Postgres — Mongo project e), <code>body-parser</code> (Express 5 built-in), <code>node-fetch</code> (axios ache), <code>express-async-handler</code> (own <code>asyncHandler</code> util ache). Bundle + audit surface bariye.</li>
+<li><strong>M-3</strong> — <code>console.log</code> everywhere, IPN body soho (payment PII log e). Structured logger (pino/winston) + redaction dorkar.</li>
+<li><strong>M-4</strong> — Cron every-minute, in-process, no distributed lock. Multi-instance deploy hole prottek instance campaign apply korbe. Log spam o ache (prot minute e "No new campaign" print).</li>
+<li><strong>M-5</strong> — Mixed storage: <code>/uploads</code> static disk serve + Cloudinary duitai. Serverless/Vercel e disk ephemeral — image harabe.</li>
+<li><strong>M-6</strong> — helmet default <code>crossOriginResourcePolicy</code> <code>/uploads</code> er image cross-origin block korte pare.</li>
+<li><strong>M-7</strong> — <code>compression</code> middleware nei.</li>
+<li><strong>M-8</strong> — Password minlength 6, kono complexity/breach check nei. Failed-login account lockout nei (sudhu IP-based limit).</li>
+<li><strong>M-9</strong> — Bulk demo review endpoint production e exposed. Env guard dorkar.</li>
+<li><strong>M-10</strong> — <code>npm test</code> = <code>exit 1</code>. Zero test. Order pricing, stock decrement, payment verification — eishob e minimum integration test dorkar.</li>
+<li><strong>M-11</strong> — <code>.env.example</code>, README, API docs (Swagger/OpenAPI) kichui nei.</li>
+<li><strong>M-12</strong> — Frontend e no data-fetching cache layer (React Query/SWR), no code-splitting (<code>React.lazy</code>), no schema validation (zod/yup) — react-hook-form ache but resolver nei.</li>
+</ul>
+
+<h2>4. Ki Ki Kaj Baki — Step by Step</h2>
+
+<p>Order ta <strong>dependency-driven</strong>: agerta na korle porerta kaj korbe na. Estimate solo dev, focused day.</p>
+
+<div class="phase">
+<div class="meta">Phase 0 · 1–2 din · Blocker fix</div>
+<h3>Security &amp; broken-flow patch</h3>
+<ol>
+<li>Guest order access token banao — <code>Order</code> schema e <code>guestAccessToken: String</code>, create-e <code>crypto.randomBytes(24).toString("hex")</code>, <code>getOrderById</code> e token/email match require koro. <em>(C-1)</em></li>
+<li><code>orderRoutes.js</code> — <code>GET /</code> ke <code>optionalProtect</code> theke <code>protect</code> koro. <em>(C-3)</em></li>
+<li><code>FrontendLayout.jsx:27</code> operator precedence bracket fix. <em>(H-1)</em></li>
+<li>Order model e 4 ta index add koro. <em>(H-5)</em></li>
+<li><code>express-mongo-sanitize</code> + <code>hpp</code> + global <code>/api</code> rate limiter + <code>compression</code> wire koro. <em>(H-2, H-6)</em></li>
+<li>Coupon apply e limiter + <code>optionalProtect</code>. <em>(H-3)</em></li>
+<li>IPN idempotency guard. <em>(H-4)</em></li>
+<li>Unused deps remove (<code>pg</code>, <code>body-parser</code>, <code>node-fetch</code>, <code>express-async-handler</code>). <em>(M-2)</em></li>
+<li><code>.env.example</code> + README likho.</li>
+</ol>
+</div>
+
+<div class="phase">
+<div class="meta">Phase 1 · 3–4 din · Foundation</div>
+<h3>Storefront shell</h3>
+<ol>
+<li><strong>Design system</strong> — Tailwind v4 <code>@theme</code> tokens (color, spacing, radius, typography), base component set: Button, Input, Select, Badge, Modal, Drawer, Skeleton, EmptyState, Spinner.</li>
+<li><strong>Header</strong> — <code>navbarApi.getConfig()</code> theke driven mega-menu, category dropdown, search bar, cart icon + badge, user menu. Sticky + mobile hamburger drawer.</li>
+<li><strong>Footer</strong> — link columns, payment logos, newsletter, contact, social.</li>
+<li><strong>SEO component</strong> — <code>pageMetaApi.getBySlug()</code> consume kore <code>&lt;title&gt;</code>/OG/canonical set kore (React 19 e native metadata hoisting ache, extra lib lagbe na).</li>
+<li><strong>OfferPopup</strong> — <code>/api/offers/active</code>, localStorage dismissal + priority order.</li>
+<li><strong>Global plumbing</strong> — ErrorBoundary, ScrollToTop, route-level <code>React.lazy</code> + Suspense, 404/500 pages, react-hot-toast <code>&lt;Toaster/&gt;</code> config.</li>
+<li><strong>React Query setup</strong> — <code>QueryClientProvider</code>, sensible <code>staleTime</code>, ar existing <code>api/*</code> module gulo query/mutation hook e wrap koro.</li>
+</ol>
+</div>
+
+<div class="phase">
+<div class="meta">Phase 2 · 4–5 din · Catalog</div>
+<h3>Browse &amp; discover</h3>
+<ol>
+<li><strong>ProductCard</strong> — image hover swap, discount badge, campaign badge, rating, quick-add, stock-out overlay.</li>
+<li><strong>HomePage</strong> — hero slider (<code>/api/hero-items</code>), hero content block (<code>/api/hero</code>), category grid, featured (<code>/api/products/featured</code>), dynamic sections (<code>/api/products/homepage-sections</code> → per-section <code>/dynamic-section/:id</code>).</li>
+<li><strong>Shop / Category page</strong> — <code>/shop</code> ar <code>/category/:slug</code>. Filter sidebar: category tree, price range, attribute facets (<code>/api/products/attributes</code> + <code>/filter/multiple-attributes</code>), stock, rating. Sort dropdown. Pagination ba infinite scroll. Filter state URL search-param e sync koro (shareable + back-button safe).</li>
+<li><strong>Search</strong> — <code>/search?q=</code> page + header autocomplete dropdown, debounced. <em>Note: backend e dedicated search endpoint nei — text index ache, <code>getProducts</code> e <code>?q=</code> support ache kina verify koro, na thakle add koro.</em></li>
+<li><strong>Breadcrumb</strong> — category tree theke build.</li>
+</ol>
+</div>
+
+<div class="phase">
+<div class="meta">Phase 3 · 4–5 din · PDP</div>
+<h3>Product detail page</h3>
+<ol>
+<li><strong>Gallery</strong> — thumbnail rail, zoom, variant-image group switch (<code>variant.imageGroupName</code> use kore), mobile swipe.</li>
+<li><strong>Variant selector</strong> — <code>variant.options[]</code> shape follow koro (name/value pair array). Multi-attribute (Color + Size) combination matrix, unavailable combo disable, per-variant stock + price + SKU.</li>
+<li><strong>Price block</strong> — original vs discounted, campaign badge + countdown, save %, stock indicator ("only 3 left").</li>
+<li><strong>Actions</strong> — quantity stepper, Add to Cart, Buy Now (cart bypass kore direct checkout).</li>
+<li><strong>A+ content renderer</strong> — <code>/api/aplus-content/product-slug/:slug</code>, block-type wise render.</li>
+<li><strong>Reviews</strong> — list + rating histogram + pagination (<code>/api/reviews/product/:id</code>), review submit form (login-gated), own-review edit/delete.</li>
+<li><strong>Related products</strong> — <code>/api/products/related</code>.</li>
+<li><strong>View counter</strong> — mount-e <code>PUT /api/products/:id/view</code> (once per session).</li>
+</ol>
+</div>
+
+<div class="phase">
+<div class="meta">Phase 4 · 3–4 din · Cart</div>
+<h3>Cart with guest support</h3>
+<ol>
+<li><strong>CartContext</strong> — dual-mode. Guest: localStorage (product id + variant options + qty). Logged-in: server <code>/api/cart</code>.</li>
+<li><strong>Merge on login</strong> — backend e <code>POST /api/cart/merge</code> endpoint banate hobe (<em>ekhono nei</em>), ja guest items nebe ar existing server cart er sathe merge korbe.</li>
+<li><strong>CartDrawer</strong> — header icon theke slide-in, mini line items, subtotal, checkout CTA.</li>
+<li><strong>CartPage</strong> — full table, qty update, remove, variant display name, coupon input (<code>/api/coupons/apply</code>), totals via <code>/api/checkout/calculate</code>.</li>
+<li><strong>Price refresh</strong> — guest cart e localStorage price stale hoy. Load-e server theke current price re-validate koro, change hole user ke janao.</li>
+<li><strong>Empty / stock-out states.</strong></li>
+</ol>
+</div>
+
+<div class="phase">
+<div class="meta">Phase 5 · 5–6 din · Checkout</div>
+<h3>Sob theke complex module</h3>
+<ol>
+<li><strong>Address form</strong> — logged-in hole saved address picker (<code>/api/auth/address</code>), guest hole manual entry.</li>
+<li><strong>Location cascade</strong> — <code>/api/checkout/districts</code> → <code>/upazilas/:district</code> → <code>/courier-branches/:district</code>. <code>locationType</code> resolve koro: <code>dhaka_inside</code> / <code>dhaka_sub</code> / <code>outside_dhaka</code> (<code>/validate-location</code> use koro).</li>
+<li><strong>Conditional required fields</strong> — Order schema er conditional <code>required</code> exactly mirror koro: <code>outside_dhaka</code> hole <code>deliveryType</code> lage; <code>Courier</code> hole <code>courierBranch</code> lage; Home Delivery ba Dhaka hole <code>addressLine1</code>/<code>district</code>/<code>upazila</code> lage.</li>
+<li><strong>Shipping calc</strong> — <code>POST /api/checkout/calculate</code>. Quantity-based flat charge breakdown display koro.</li>
+<li><strong>Payment method</strong> — COD (partial advance: <code>codCharge</code>, <code>codOnlinePaymentAmount</code>, <code>remainingAmount</code> — ei logic UI te clearly explain koro) vs SSLCommerz full.</li>
+<li><strong>Order review step</strong> — items + address + totals confirm, tarpor <code>POST /api/orders</code>.</li>
+<li><strong>Gateway handoff</strong> — SSLCommerz hole response er <code>GatewayPageURL</code> e redirect.</li>
+<li><strong>Guest checkout</strong> — email/phone required, "create account?" optional checkbox.</li>
+<li><strong>Multi-step wizard</strong> — step state URL e rakho, refresh-safe.</li>
+</ol>
+</div>
+
+<div class="phase">
+<div class="meta">Phase 6 · 2 din · Post-order <span class="tag t-crit" style="margin-left:6px">BLOCKER</span></div>
+<h3>Order result pages</h3>
+<ol>
+<li><code>/order/success</code> — <code>?orderId=&amp;orderNumber=</code> read kore order fetch, confirmation + items + totals + estimated delivery. <strong>Ei route ta na thakle payment flow completely broken.</strong></li>
+<li><code>/order/fail</code> — <code>?reason=</code> handle koro (<code>verification_failed</code>, <code>server_error</code>), retry CTA.</li>
+<li><code>/order/cancel</code> — cart restore + shop e ferar CTA.</li>
+<li><code>/order/track</code> — order number + phone diye guest tracking, status timeline (<code>statusHistory</code> render).</li>
+<li>Invoice print view (browser print CSS, kono lib chara).</li>
+</ol>
+</div>
+
+<div class="phase">
+<div class="meta">Phase 7 · 3–4 din · Account</div>
+<h3>Customer area</h3>
+<ol>
+<li><strong>My Orders</strong> — list + detail + status timeline + reorder button.</li>
+<li><strong>Address book</strong> — CRUD, default set (backend ready).</li>
+<li><strong>My Reviews</strong> — <code>/api/reviews/my-reviews</code>, edit/delete.</li>
+<li><strong>Profile</strong> — expand koro: profile picture upload, DOB, gender, preferences (newsletter / SMS / email toggle — schema e ache, UI nei).</li>
+<li><strong>Change password</strong> — <em>backend endpoint nei</em>, <code>PUT /api/auth/change-password</code> add korte hobe.</li>
+<li><strong>Wishlist</strong> — <em>puro module nei</em>. Model + controller + route + UI — sob banate hobe.</li>
+</ol>
+</div>
+
+<div class="phase">
+<div class="meta">Phase 8 · 2–3 din · Admin gaps</div>
+<h3>Backend ready, UI nei</h3>
+<ol>
+<li><strong>Hero Slides</strong> — <code>/api/admin/hero-items</code> full CRUD + drag reorder. UI nei.</li>
+<li><strong>Hero Content</strong> — <code>/api/admin/hero-content</code>. UI nei.</li>
+<li><strong>A+ Content</strong> — <code>/api/admin/aplus-content</code> block builder. UI nei.</li>
+<li><strong>Sales Report</strong> — <code>/api/admin/analytics/sales-report</code> exist kore, dashboard e surface hocche na. Date-range picker + chart + CSV export.</li>
+<li>Order list e bulk action + CSV export.</li>
+<li>Low-stock alert widget dashboard e.</li>
+</ol>
+</div>
+
+<div class="phase">
+<div class="meta">Phase 9 · 3–4 din · Hardening</div>
+<h3>Quality &amp; performance</h3>
+<ol>
+<li>Backend: pino logger + PII redaction, Swagger docs, Vitest/Jest + supertest integration test (order pricing, stock, payment verify), cron-e distributed lock.</li>
+<li>Frontend: zod resolver react-hook-form e, skeleton loading sob list e, optimistic cart update, image lazy-load + <code>srcset</code>, Lighthouse pass (target LCP &lt; 2.5s).</li>
+<li>A11y: keyboard nav, focus trap modal/drawer e, ARIA label, contrast check.</li>
+<li>Full mobile responsive audit — 360px theke start.</li>
+</ol>
+</div>
+
+<div class="phase">
+<div class="meta">Phase 10 · 2–3 din · Launch</div>
+<h3>Go-live</h3>
+<ol>
+<li>Production env config (SSLCommerz live credential, real CORS origin, <code>NODE_ENV=production</code>).</li>
+<li><code>sitemap.xml</code>, <code>robots.txt</code>, structured data (Product / BreadcrumbList JSON-LD).</li>
+<li>GA4 + Meta Pixel + ecommerce event (view_item, add_to_cart, begin_checkout, purchase).</li>
+<li>Sentry (frontend + backend).</li>
+<li>Mongo Atlas backup schedule + index verify (<code>explain()</code> on hot query).</li>
+<li>Staging e full order lifecycle test — COD, SSLCommerz sandbox, guest, coupon, campaign, refund.</li>
+</ol>
+</div>
+
+<h2>5. Timeline</h2>
+
+<div class="scroll">
+<table>
+<thead><tr><th>Phase</th><th>Scope</th><th>Est.</th><th>Cumulative</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>Security &amp; blocker fix</td><td>1–2 d</td><td>2 d</td></tr>
+<tr><td>1</td><td>Storefront foundation</td><td>3–4 d</td><td>6 d</td></tr>
+<tr><td>2</td><td>Catalog / browse</td><td>4–5 d</td><td>11 d</td></tr>
+<tr><td>3</td><td>Product detail page</td><td>4–5 d</td><td>16 d</td></tr>
+<tr><td>4</td><td>Cart + guest cart</td><td>3–4 d</td><td>20 d</td></tr>
+<tr><td>5</td><td>Checkout</td><td>5–6 d</td><td>26 d</td></tr>
+<tr><td>6</td><td>Order result pages</td><td>2 d</td><td>28 d</td></tr>
+<tr><td>7</td><td>Customer account</td><td>3–4 d</td><td>32 d</td></tr>
+<tr><td>8</td><td>Admin gaps</td><td>2–3 d</td><td>35 d</td></tr>
+<tr><td>9</td><td>Hardening</td><td>3–4 d</td><td>39 d</td></tr>
+<tr><td>10</td><td>Launch</td><td>2–3 d</td><td><strong>~42 d</strong></td></tr>
+</tbody>
+</table>
+</div>
+
+<p><strong>MVP launch</strong> (Phase 0–6, storefront functional + payment working): <strong>~28 working day</strong>. Phase 7–10 launch-er por o iterate kora jay.</p>
+
+<h2>6. Architecture Suggestions</h2>
+
+<ul>
+<li><strong>Backend layering</strong> — currently controller e business logic vari (orderController ~1100 line). <code>pricingService</code> / <code>productCampaignService</code> pattern ta already valo — ei pattern ta <code>orderService</code>, <code>checkoutService</code>, <code>couponService</code> e extend koro. Controller sudhu HTTP concern (parse → call service → shape response) handle korbe.</li>
+<li><strong>Repository layer</strong> — Mongoose query controller theke sriye <code>repositories/</code> e nao. Test kora onek shohoj hobe, ar aggregation pipeline reuse kora jabe.</li>
+<li><strong>Validation</strong> — <code>express-validator</code> rule gulo route file e scattered. Ekta <code>validators/</code> folder e centralize koro, per-resource file.</li>
+<li><strong>Frontend structure</strong> — <code>features/</code> based colocation consider koro (<code>features/cart/{api,components,hooks,store}</code>) — admin+storefront duitai grow korle flat <code>pages/components/api</code> split ta unwieldy hobe.</li>
+<li><strong>Shared types</strong> — TypeScript e migrate na korleo, minimum ekta <code>shared/constants.js</code> rakho jekhane order status, payment status, location type enum ache — currently frontend e hardcoded string, backend enum er sathe drift korbe.</li>
+</ul>
+
+<hr>
+<p class="foot">Generated from static analysis of <code>footpath-backend</code> and <code>footpath-frontend</code> — 29 Aug 2026. Line references reflect the code as read at audit time.</p>
+
+</div>
+</body>
+</html>

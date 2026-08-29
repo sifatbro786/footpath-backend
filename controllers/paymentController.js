@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import { verifyPayment } from "../config/sslcommerz.js";
 import Order from "../models/Order.js";
 import { updateProductStock } from "./orderController.js";
@@ -9,13 +10,47 @@ const getClientUrl = () => {
     );
 };
 
-// Helper function to find order by ID or orderNumber
+// Helper function to find order by ID or orderNumber.
+//
+// `+guestAccessToken` is required so the redirect helper below can hand the
+// capability token back to a guest's browser — the field is `select: false` on
+// the schema and would otherwise come back undefined.
+//
+// The isValidObjectId guard prevents a CastError when tran_id is an orderNumber
+// (findById on a non-ObjectId string throws rather than returning null).
 const findOrder = async (tran_id) => {
-    let order = await Order.findById(tran_id);
+    let order = null;
+    if (mongoose.isValidObjectId(tran_id)) {
+        order = await Order.findById(tran_id).select("+guestAccessToken");
+    }
     if (!order) {
-        order = await Order.findOne({ orderNumber: tran_id });
+        order = await Order.findOne({ orderNumber: tran_id }).select("+guestAccessToken");
     }
     return order;
+};
+
+/**
+ * Build a storefront result URL for an order.
+ *
+ * SECURITY (Phase 0): the gateway redirects the customer's *browser* here, so
+ * this is the only point in the flow where a guest can be handed the capability
+ * token that lets them read their own order back
+ * (GET /api/orders/:id?token=...). Registered users prove ownership with their
+ * JWT and never receive a token.
+ *
+ * URLSearchParams also gets us encoding for free — orderNumber and reason
+ * strings were previously interpolated raw into the query string.
+ */
+const buildOrderResultUrl = (clientUrl, path, order, extraParams = {}) => {
+    const params = new URLSearchParams({
+        orderId: String(order._id),
+        orderNumber: order.orderNumber || "",
+        ...extraParams,
+    });
+    if (order.isGuest && order.guestAccessToken) {
+        params.set("token", order.guestAccessToken);
+    }
+    return `${clientUrl}${path}?${params.toString()}`;
 };
 
 export const processSuccessRedirect = async (req, res) => {
@@ -52,9 +87,10 @@ export const processSuccessRedirect = async (req, res) => {
 
         if (order.orderStatus !== "Pending") {
             console.log(`Already processed: ${order.orderStatus}`);
-            return res.redirect(
-                `${CLIENT_URL}/order/success?orderId=${order._id}&orderNumber=${order.orderNumber}`,
-            );
+            // Must carry the token too — a guest refreshing the success page or
+            // hitting a duplicate gateway callback lands here, and without it
+            // the confirmation page would 401 on its order fetch.
+            return res.redirect(buildOrderResultUrl(CLIENT_URL, "/order/success", order));
         }
 
         let isVerified = false;
@@ -153,8 +189,8 @@ export const processSuccessRedirect = async (req, res) => {
             await order.save({ validateBeforeSave: false });
             console.log("Order saved successfully");
 
-            const redirectUrl = `${CLIENT_URL}/order/success?orderId=${order._id}&orderNumber=${order.orderNumber}`;
-            console.log(`Redirecting to: ${redirectUrl}`);
+            const redirectUrl = buildOrderResultUrl(CLIENT_URL, "/order/success", order);
+            console.log(`Redirecting to /order/success for ${order.orderNumber}`);
             return res.redirect(redirectUrl);
         } else {
             console.error("Payment verification failed");
@@ -171,7 +207,9 @@ export const processSuccessRedirect = async (req, res) => {
             await order.save({ validateBeforeSave: false });
 
             return res.redirect(
-                `${CLIENT_URL}/order/fail?orderId=${order._id}&reason=verification_failed`,
+                buildOrderResultUrl(CLIENT_URL, "/order/fail", order, {
+                    reason: "verification_failed",
+                }),
             );
         }
     } catch (error) {
@@ -182,70 +220,74 @@ export const processSuccessRedirect = async (req, res) => {
     }
 };
 
-export const processFailRedirect = async (req, res) => {
-    console.log("PROCESS FAIL REDIRECT CALLED");
-    console.log("Query params:", req.query);
-
+/**
+ * Shared implementation for the gateway's fail and cancel callbacks. Both do
+ * exactly the same thing — cancel a still-Pending order and bounce the customer
+ * back to the storefront — so they differ only in the note recorded and the
+ * page they land on.
+ *
+ * NOTE: `updatedBy` is deliberately omitted for system-generated history
+ * entries. The path is an ObjectId ref, and the string "system" that used to be
+ * passed here never actually persisted: Mongoose records a cast failure instead
+ * of throwing, and `validateBeforeSave: false` then discards that error, so the
+ * field silently saved as undefined. Omitting it is what was already happening,
+ * minus the phantom error. Same pattern still exists in `adminNotes.addedBy`
+ * elsewhere in this file and in orderController — worth a follow-up sweep.
+ */
+const cancelPendingOrderAndRedirect = async (req, res, { note, path, reason }) => {
     const CLIENT_URL = getClientUrl();
     const { orderId, tran_id } = req.query;
     const finalOrderId = orderId || tran_id;
 
+    let order = null;
     if (finalOrderId) {
         try {
-            const order = await findOrder(finalOrderId);
+            order = await findOrder(finalOrderId);
             if (order && order.orderStatus === "Pending") {
                 order.orderStatus = "Cancelled";
                 order.paymentStatus = "Failed";
 
                 order.statusHistory.push({
                     status: "Cancelled",
-                    note: "Payment failed or cancelled by user",
-                    updatedBy: "system",
+                    note,
                     updatedAt: new Date(),
                 });
 
                 await order.save({ validateBeforeSave: false });
-                console.log(`Order ${order.orderNumber} cancelled due to payment failure`);
+                console.log(`Order ${order.orderNumber} cancelled: ${reason}`);
             }
         } catch (error) {
-            console.error("Error cancelling order:", error);
+            console.error("Error cancelling order:", error.message);
         }
     }
 
-    return res.redirect(`${CLIENT_URL}/order/fail?orderId=${finalOrderId || ""}`);
+    // If the order could not be resolved there is no token to hand back and no
+    // id worth echoing — send the customer to the bare result page.
+    if (!order) {
+        return res.redirect(`${CLIENT_URL}${path}?reason=${encodeURIComponent(reason)}`);
+    }
+    return res.redirect(buildOrderResultUrl(CLIENT_URL, path, order, { reason }));
+};
+
+export const processFailRedirect = async (req, res) => {
+    console.log("PROCESS FAIL REDIRECT CALLED");
+    return cancelPendingOrderAndRedirect(req, res, {
+        note: "Payment failed at gateway",
+        path: "/order/fail",
+        reason: "payment_failed",
+    });
 };
 
 export const processCancelRedirect = async (req, res) => {
     console.log("PROCESS CANCEL REDIRECT CALLED");
-    console.log("Query params:", req.query);
-
-    const CLIENT_URL = getClientUrl();
-    const { orderId, tran_id } = req.query;
-    const finalOrderId = orderId || tran_id;
-
-    if (finalOrderId) {
-        try {
-            const order = await findOrder(finalOrderId);
-            if (order && order.orderStatus === "Pending") {
-                order.orderStatus = "Cancelled";
-                order.paymentStatus = "Failed";
-
-                order.statusHistory.push({
-                    status: "Cancelled",
-                    note: "Payment cancelled by user",
-                    updatedBy: "system",
-                    updatedAt: new Date(),
-                });
-
-                await order.save({ validateBeforeSave: false });
-                console.log(`Order ${order.orderNumber} cancelled by user`);
-            }
-        } catch (error) {
-            console.error("Error cancelling order:", error);
-        }
-    }
-
-    return res.redirect(`${CLIENT_URL}/order/fail?orderId=${finalOrderId || ""}&reason=cancelled`);
+    // FIX: this used to redirect to /order/fail, so a customer who deliberately
+    // backed out of payment was shown a failure page. It now lands on the
+    // dedicated /order/cancel route.
+    return cancelPendingOrderAndRedirect(req, res, {
+        note: "Payment cancelled by user",
+        path: "/order/cancel",
+        reason: "cancelled",
+    });
 };
 
 export const handleIPN = async (req, res) => {

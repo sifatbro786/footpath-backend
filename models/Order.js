@@ -142,6 +142,25 @@ const orderSchema = new mongoose.Schema(
         guestEmail: {
             type: String,
         },
+        // SECURITY (Phase 0 — IDOR patch): guest orders used to be readable by
+        // anyone who knew the order id/number, and orderNumber is sequential
+        // (ORD + YYMMDD + 0001), so the whole day's guest PII could be walked by
+        // incrementing a counter. Every guest order now carries an unguessable
+        // 48-hex-char capability token; GET /api/orders/:id will not return a
+        // guest order unless the caller presents it (or is an admin).
+        //
+        // `select: false` keeps it out of every ordinary query result, so it can
+        // never be echoed back inside an order payload by accident — callers that
+        // genuinely need it must opt in with .select("+guestAccessToken").
+        // Stored in plaintext rather than hashed on purpose: the redirect built in
+        // paymentController has to hand the raw token back to the browser after the
+        // gateway round-trip, and hashing protects nothing here — the token guards
+        // the very document it is stored on, so DB read access already implies
+        // access to the PII it protects.
+        guestAccessToken: {
+            type: String,
+            select: false,
+        },
         orderNumber: {
             type: String,
             unique: true,
@@ -230,6 +249,17 @@ const orderSchema = new mongoose.Schema(
         timestamps: true,
     },
 );
+
+// ─── Indexes ─────────────────────────────────────────────────────────────────
+// PERF (Phase 0): the collection previously had no index at all beyond the
+// implicit unique one on `orderNumber`. Every admin order list, every customer
+// "my orders" call and every analytics aggregation was a full collection scan,
+// which degrades linearly with order volume — the one collection guaranteed to
+// grow forever.
+orderSchema.index({ user: 1, createdAt: -1 }); // getMyOrders
+orderSchema.index({ orderStatus: 1, createdAt: -1 }); // admin list filtered by status
+orderSchema.index({ paymentStatus: 1 }); // payment reconciliation / unpaid sweeps
+orderSchema.index({ createdAt: -1 }); // unfiltered admin list + date-range reports
 
 // Order Number Generate Middleware
 orderSchema.pre("save", async function (next) {
