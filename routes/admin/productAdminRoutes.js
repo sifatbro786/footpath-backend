@@ -7,6 +7,7 @@ import {
     deleteProduct,
     getAdminProducts,
     getAdminProductsOptimized,
+    getLowStockProducts,
     getAllDynamicSections,
     getNextDisplayOrder,
     getOrderedProducts,
@@ -61,6 +62,8 @@ const bulkCategoryOrderValidationRules = [
 // Dashboard
 router.get("/dashboard", getAdminProducts);
 router.get("/dashboard/optimized", getAdminProductsOptimized);
+// PHASE 9: must sit above "/:id" so "low-stock" is not read as a product id.
+router.get("/low-stock", getLowStockProducts);
 
 // Ordering
 router.put("/reorder", reorderValidationRules, reorderProducts);

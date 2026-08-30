@@ -1908,6 +1908,68 @@ export const addReview = async (req, res) => {
 };
 
 // Get featured products
+// @desc    Products at or below their own low stock threshold
+// @route   GET /api/admin/products/low-stock
+// @access  Private/Admin
+//
+// PHASE 9: getAdminProducts filters by search, category and discountType but has
+// no stock filter, and this comparison cannot be expressed as one anyway: the
+// threshold is per product (`lowStockAlert`), so it is a field-to-field
+// comparison that needs $expr rather than a literal value.
+//
+// Variants complicate it. A product with variants carries its sellable stock on
+// each variant row, and the parent `stock` is often 0 and meaningless. So the
+// effective stock is the SUM of variant stock when variants exist, and the
+// parent stock otherwise.
+export const getLowStockProducts = async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
+
+        const products = await Product.aggregate([
+            { $match: { isActive: true } },
+            {
+                $addFields: {
+                    effectiveStock: {
+                        $cond: [
+                            { $and: [{ $eq: ["$hasVariants", true] }, { $gt: [{ $size: { $ifNull: ["$variants", []] } }, 0] }] },
+                            { $sum: "$variants.stock" },
+                            { $ifNull: ["$stock", 0] },
+                        ],
+                    },
+                    threshold: { $ifNull: ["$lowStockAlert", 5] },
+                },
+            },
+            { $match: { $expr: { $lte: ["$effectiveStock", "$threshold"] } } },
+            // Out of stock first, then closest to running out.
+            { $sort: { effectiveStock: 1, name: 1 } },
+            { $limit: limit },
+            {
+                $project: {
+                    name: 1,
+                    slug: 1,
+                    sku: 1,
+                    effectiveStock: 1,
+                    threshold: 1,
+                    hasVariants: 1,
+                    imageGroups: { $slice: ["$imageGroups", 1] },
+                },
+            },
+        ]);
+
+        res.status(200).json({
+            success: true,
+            count: products.length,
+            products,
+        });
+    } catch (error) {
+        console.error("Low stock query error:", error.message);
+        res.status(500).json({
+            success: false,
+            message: "Error fetching low stock products",
+        });
+    }
+};
+
 export const getFeaturedProducts = async (req, res) => {
     try {
         const products = await Product.find({

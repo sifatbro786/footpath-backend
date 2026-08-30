@@ -6,6 +6,36 @@ import HeroItem from "../../models/Hero.js";
 // @desc    Create new hero item
 // @route   POST /api/admin/hero-items
 // @access  Private/Admin
+// @desc    List every hero item, active or not
+// @route   GET /api/admin/hero-items
+// @access  Private/Admin
+//
+// PHASE 9: the admin router had create, update, delete and reorder but NO list
+// route, so the only way to see slides was the public GET /api/hero-items,
+// which filters `isActive: true`. That made deactivated slides invisible to the
+// person who deactivated them, and therefore impossible to re-enable or delete
+// from the panel.
+export const getAllHeroItemsAdmin = async (req, res) => {
+    try {
+        const heroItems = await HeroItem.find({})
+            .sort({ order: 1, createdAt: -1 })
+            .select("-__v");
+
+        res.status(200).json({
+            success: true,
+            count: heroItems.length,
+            data: heroItems,
+        });
+    } catch (error) {
+        console.error("Admin hero list error:", error.message);
+        res.status(500).json({
+            success: false,
+            message: "Server Error",
+            error: error.message,
+        });
+    }
+};
+
 export const createHeroItem = async (req, res) => {
     try {
         const { title, subtitle, buttonText, mediaType, mediaUrl, deviceType, order, duration } =
