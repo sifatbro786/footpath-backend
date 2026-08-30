@@ -2,6 +2,7 @@ import express from "express";
 import {
     addReview,
     getProductReviews,
+    getFeaturedReviews,
     getUserReviews,
     updateReview,
     deleteReview,
@@ -26,6 +27,10 @@ const updateReviewValidationRules = [
 ];
 
 // Public route - anyone can see approved reviews
+//
+// NOTE: /featured must be declared before any "/:something" route on this
+// router, or Express would match it as a param and treat "featured" as an id.
+router.get("/featured", getFeaturedReviews);
 router.get("/product/:productId", getProductReviews);
 
 // User routes (authenticated) - require login, not admin

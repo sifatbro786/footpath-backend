@@ -196,6 +196,54 @@ export const getProductReviews = async (req, res) => {
 };
 
 // Get user's own reviews
+// @desc    Highly rated approved reviews across the whole catalogue
+// @route   GET /api/reviews/featured
+// @access  Public
+//
+// PHASE 4: added for the homepage testimonials strip. Every existing public
+// review route is scoped to one product (/product/:productId) or to the signed
+// in user (/my-reviews), and the site-wide list lived only behind
+// /api/admin/reviews/all — so the storefront had no way to show real customer
+// quotes without exposing an admin endpoint.
+//
+// Deliberately narrow: approved only, 4 stars and up, comment must be
+// substantial enough to read as a quote, and only the reviewer's name plus the
+// product name/slug are returned. No email, no user id, no admin notes.
+export const getFeaturedReviews = async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit, 10) || 6, 20);
+
+        const reviews = await Review.find({
+            status: "approved",
+            rating: { $gte: 4 },
+            comment: { $exists: true, $ne: "" },
+        })
+            .select("rating comment createdAt user product")
+            .populate("user", "name")
+            .populate("product", "name slug")
+            .sort({ rating: -1, helpfulCount: -1, createdAt: -1 })
+            .limit(limit)
+            .lean();
+
+        // A one word "Nice" is a valid review but a poor testimonial. Filtering
+        // in the query would need $expr on string length, which cannot use an
+        // index; the candidate set here is already capped, so trim in memory.
+        const usable = reviews.filter((r) => (r.comment || "").trim().length >= 20);
+
+        res.status(200).json({
+            success: true,
+            count: usable.length,
+            reviews: usable,
+        });
+    } catch (error) {
+        console.error("Error fetching featured reviews:", error.message);
+        res.status(500).json({
+            success: false,
+            message: "Error fetching featured reviews",
+        });
+    }
+};
+
 export const getUserReviews = async (req, res) => {
     try {
         const userId = req.user._id;

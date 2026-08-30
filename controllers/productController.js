@@ -391,6 +391,16 @@ export const getProducts = async (req, res) => {
             sortBy = "displayOrder",
             sortOrder = "asc",
             discountType,
+            // PHASE 3: attribute facets and rating were only reachable through
+            // getProductsByMultipleAttributes, which supports attributes and
+            // pagination and NOTHING else — no category, price, stock, sort or
+            // search, and no campaign pricing. That made "Colour: Blue under
+            // ৳500, newest first" impossible to express in one request.
+            // Both are now first-class filters here so the catalogue can combine
+            // every facet. /filter/multiple-attributes is left untouched for
+            // backwards compatibility.
+            attributes,
+            minRating,
         } = req.query;
 
         const limitInt = parseInt(limit);
@@ -420,6 +430,53 @@ export const getProducts = async (req, res) => {
 
         if (discountType && discountType !== "all") {
             filter.discountType = discountType;
+        }
+
+        // ─── Attribute facets (PHASE 3) ──────────────────────────────────────
+        // Accepts a JSON object: ?attributes={"Colour":"Blue","Size":"A5"}
+        // An array value multi-selects within one facet:
+        //   {"Colour":["Blue","Black"]}  ->  Colour is Blue OR Black
+        // Different keys AND together, values within a key OR together, which is
+        // how shoppers expect facets to behave.
+        //
+        // Malformed JSON is ignored rather than answered with a 400: this value
+        // comes from a URL the user may have edited or truncated, and dropping
+        // one bad facet is friendlier than failing the whole listing.
+        if (attributes) {
+            let parsedAttributes = null;
+            try {
+                parsedAttributes =
+                    typeof attributes === "string" ? JSON.parse(attributes) : attributes;
+            } catch {
+                parsedAttributes = null;
+            }
+
+            if (parsedAttributes && typeof parsedAttributes === "object") {
+                const clauses = Object.entries(parsedAttributes)
+                    .filter(([key, value]) => key && value != null && value !== "")
+                    .map(([key, value]) => ({
+                        attributes: {
+                            $elemMatch: {
+                                key,
+                                value: Array.isArray(value) ? { $in: value } : value,
+                            },
+                        },
+                    }));
+
+                if (clauses.length > 0) {
+                    // `category` above may already own filter.$or; $and is a
+                    // separate key, so the two never collide.
+                    filter.$and = [...(filter.$and || []), ...clauses];
+                }
+            }
+        }
+
+        // ─── Rating floor (PHASE 3) ──────────────────────────────────────────
+        // averageRating is denormalised onto Product by the review controller,
+        // so this is a plain field comparison rather than an aggregation.
+        const minRatingValue = parseFloat(minRating);
+        if (Number.isFinite(minRatingValue) && minRatingValue > 0) {
+            filter.averageRating = { $gte: minRatingValue };
         }
 
         let sortOptions = {};
