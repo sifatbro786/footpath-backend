@@ -558,6 +558,88 @@ const getOrderItemName = (productName, variant, variantDisplayName) => {
     return itemName;
 };
 
+// @desc    Look up an order by number + phone, for guests
+// @route   POST /api/orders/track
+// @access  Public (rate limited)
+//
+// PHASE 6: a guest's only route back to their order was the capability token
+// in the confirmation URL. Lose that link and the order is unreachable, which
+// is the single most common support request a shop gets.
+//
+// Why phone rather than the token: the token is a bearer secret, unguessable
+// by design, and asking someone to paste a 48 character hex string is not a
+// recovery path. orderNumber + the phone on the order is a two factor check
+// that a real customer can satisfy from memory.
+//
+// Why POST: the phone number is PII and must not land in access logs, browser
+// history or a Referer header, all of which happen with a GET query string.
+//
+// The response is deliberately a SUBSET: status, timeline, items and totals.
+// No email, no full address, no admin notes, no capability token. Enough to
+// answer "where is my order", not enough to be worth harvesting.
+export const trackOrder = async (req, res, next) => {
+    try {
+        const orderNumber = String(req.body.orderNumber || "").trim().toUpperCase();
+        const phone = String(req.body.phone || "").replace(/[\s-]/g, "");
+
+        if (!orderNumber || !phone) {
+            return res.status(400).json({
+                success: false,
+                message: "Order number and phone number are required.",
+            });
+        }
+
+        const order = await Order.findOne({ orderNumber })
+            .select("-guestAccessToken -adminNotes -__v")
+            .populate("statusHistory.updatedBy", "name");
+
+        // Identical response for "no such order" and "phone does not match", so
+        // this cannot be used to confirm which order numbers exist.
+        const storedPhone = String(order?.shippingAddress?.phone || "").replace(/[\s-]/g, "");
+        if (!order || !storedPhone || storedPhone !== phone) {
+            return res.status(404).json({
+                success: false,
+                message: "We could not find an order with those details.",
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            order: {
+                orderNumber: order.orderNumber,
+                orderStatus: order.orderStatus,
+                paymentStatus: order.paymentStatus,
+                paymentMethod: order.paymentMethod,
+                createdAt: order.createdAt,
+                paidAt: order.paidAt,
+                deliveredAt: order.deliveredAt,
+                trackingNumber: order.trackingNumber,
+                carrier: order.carrier,
+                statusHistory: order.statusHistory,
+                orderItems: order.orderItems,
+                totalPrice: order.totalPrice,
+                shippingPrice: order.shippingPrice,
+                discountAmount: order.discountAmount,
+                taxPrice: order.taxPrice,
+                codCharge: order.codCharge,
+                remainingAmount: order.remainingAmount,
+                // Coarse destination only: enough to recognise the order,
+                // not enough to reconstruct a home address.
+                shippingAddress: {
+                    name: order.shippingAddress?.name,
+                    district: order.shippingAddress?.district,
+                    upazila: order.shippingAddress?.upazila,
+                    courierBranch: order.shippingAddress?.courierBranch,
+                    deliveryType: order.shippingAddress?.deliveryType,
+                },
+            },
+        });
+    } catch (error) {
+        console.error("Order tracking error:", error.message);
+        next(error);
+    }
+};
+
 // @desc    Get my orders
 // @route   GET /api/orders
 // @access  Private

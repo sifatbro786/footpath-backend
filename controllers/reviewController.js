@@ -255,7 +255,11 @@ export const getUserReviews = async (req, res) => {
         }
 
         const reviews = await Review.find(filter)
-            .populate("product", "name slug images price")
+            // FIX (Phase 6): populated "images", which is not a field on
+            // Product — photography lives in `imageGroups`. The select silently
+            // returned nothing, so every review in "my reviews" rendered without
+            // a product image.
+            .populate("product", "name slug imageGroups price")
             .sort({ createdAt: -1 })
             .limit(limit * 1)
             .skip((page - 1) * limit);

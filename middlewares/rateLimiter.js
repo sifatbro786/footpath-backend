@@ -42,6 +42,19 @@ export const couponLimiter = rateLimit({
     handler: jsonHandler,
 });
 
+// Order tracking (Phase 6): POST /api/orders/track is public and takes an
+// order number plus a phone. Order numbers are sequential (ORD + YYMMDD + NNNN),
+// so without a limit an attacker could walk a day's orders trying common phone
+// prefixes. 10 per 15 minutes is generous for someone checking their own order
+// and useless for enumeration.
+export const trackingLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: jsonHandler,
+});
+
 // Global API limiter (Phase 0): everything under /api that isn't covered by a
 // tighter limiter above. Generous enough that a browsing session never trips it
 // (a product page fans out to several requests), strict enough to blunt

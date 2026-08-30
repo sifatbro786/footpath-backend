@@ -457,6 +457,18 @@ export const updateProfile = async (req, res, next) => {
             profilePicture: req.body.profilePicture,
             dateOfBirth: req.body.dateOfBirth,
             gender: req.body.gender,
+            // PHASE 6: `preferences` has existed on the User schema since the
+            // start (newsletter / smsNotifications / emailNotifications) but was
+            // never accepted here, so the toggles could be read and never saved.
+            // Whitelisted key by key rather than spread, so a client cannot
+            // introduce arbitrary sub-keys into the subdocument.
+            preferences: req.body.preferences
+                ? {
+                      newsletter: Boolean(req.body.preferences.newsletter),
+                      smsNotifications: Boolean(req.body.preferences.smsNotifications),
+                      emailNotifications: Boolean(req.body.preferences.emailNotifications),
+                  }
+                : undefined,
         }; // Remove undefined fields
 
         Object.keys(fieldsToUpdate).forEach((key) => {
@@ -487,6 +499,72 @@ export const updateProfile = async (req, res, next) => {
 // @desc    Logout user
 // @route   GET /api/auth/logout
 // @access  Private
+// @desc    Change password while signed in
+// @route   PUT /api/auth/change-password
+// @access  Private
+//
+// PHASE 6: previously the only way to change a password was the forgot-password
+// OTP flow, which is a recovery path, not a maintenance one. A signed-in user
+// had no way to rotate a password they still knew.
+//
+// Distinct from resetPassword in one important way: the CURRENT password is
+// required. Without that, anyone with a borrowed unlocked session could lock
+// the real owner out permanently.
+export const changePassword = async (req, res, next) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({
+                success: false,
+                message: "Current and new password are both required.",
+            });
+        }
+
+        if (newPassword.length < 6) {
+            return res.status(400).json({
+                success: false,
+                message: "New password must be at least 6 characters.",
+            });
+        }
+
+        if (currentPassword === newPassword) {
+            return res.status(400).json({
+                success: false,
+                message: "Your new password must be different from the current one.",
+            });
+        }
+
+        // `password` is select:false on the schema, so it must be asked for.
+        const user = await User.findById(req.user.id).select("+password");
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found." });
+        }
+
+        const matches = await user.matchPassword(currentPassword);
+        if (!matches) {
+            return res.status(401).json({
+                success: false,
+                message: "Your current password is not correct.",
+            });
+        }
+
+        // Assign and save rather than findByIdAndUpdate: the pre("save") hook is
+        // what hashes the password, and update queries bypass it entirely — that
+        // mistake stores the password in plaintext.
+        user.password = newPassword;
+        await user.save();
+
+        res.status(200).json({
+            success: true,
+            message: "Password changed successfully.",
+        });
+    } catch (error) {
+        console.error("Change password error:", error.message);
+        next(error);
+    }
+};
+
 export const logout = (req, res, next) => {
     res.cookie("token", "none", {
         expires: new Date(Date.now() + 10 * 1000),

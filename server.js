@@ -26,6 +26,7 @@ import aplusContentRoutes from "./routes/aplusContentRoutes.js";
 import pageMetaRoutes from "./routes/pageMetaRoutes.js";
 import productCampaignRoutes from "./routes/productCampaignRoutes.js";
 import offerPopupRoutes from "./routes/offerPopupRoutes.js";
+import wishlistRoutes from "./routes/wishlistRoutes.js";
 
 // ============= ADMIN ROUTES (all live under routes/admin/) =============
 import adminRoutes from "./routes/admin/adminRoutes.js";
@@ -161,6 +162,7 @@ app.use(`/api/aplus-content`, aplusContentRoutes);
 app.use(`/api/page-meta`, pageMetaRoutes);
 app.use(`/api/product-campaigns`, productCampaignRoutes);
 app.use(`/api/offers`, offerPopupRoutes);
+app.use(`/api/wishlist`, wishlistRoutes);
 
 // ============= ADMIN ROUTES (all mounted under /api/admin/...) =============
 app.use(`/api/admin`, adminRoutes);

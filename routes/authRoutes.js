@@ -9,6 +9,7 @@ import {
     forgotPassword,
     resetPassword,
     updateProfile,
+    changePassword,
     addShippingAddress,
     updateShippingAddress,
     deleteShippingAddress,
@@ -31,6 +32,9 @@ router.put("/reset-password", otpLimiter, resetPassword);
 router.get("/logout", protect, logout);
 router.get("/me", protect, getMe);
 router.put("/profile", protect, updateProfile);
+// Rate limited with authLimiter: this endpoint verifies the current password,
+// which makes it a password oracle for anyone who gets hold of a session.
+router.put("/change-password", protect, authLimiter, changePassword);
 router.post("/address", protect, addShippingAddress);
 router.put("/address/:addressId", protect, updateShippingAddress);
 router.delete("/address/:addressId", protect, deleteShippingAddress);
