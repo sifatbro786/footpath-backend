@@ -4,10 +4,15 @@ import {
     addItemToCart,
     updateCartItem,
     removeItemFromCart,
+    mergeGuestCart,
 } from "../controllers/cartController.js";
 import { protect } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
+
+// PHASE 5: /merge must be declared before "/:itemId", or Express matches
+// "merge" as an item id on the PUT/DELETE routes below.
+router.post("/merge", protect, mergeGuestCart);
 
 router.route("/").get(protect, getCart).post(protect, addItemToCart);
 router.route("/:itemId").put(protect, updateCartItem).delete(protect, removeItemFromCart);

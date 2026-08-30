@@ -6,12 +6,14 @@ import {
     getCourierBranches,
     validateLocation,
     getCourierDistricts,
+    getPublicShippingRates,
 } from "../controllers/checkoutController.js";
-import { protect, optionalProtect } from "../middlewares/authMiddleware.js";
+import { optionalProtect } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
 // Existing routes
+router.get("/shipping-rates", getPublicShippingRates);
 router.get("/districts", getDistricts);
 router.get("/upazilas/:district", getUpazilas);
 router.get("/courier-branches/:district", getCourierBranches);

@@ -398,6 +398,159 @@ export const addItemToCart = async (req, res, next) => {
     }
 };
 
+// @desc    Merge a guest cart into the signed-in user's cart
+// @route   POST /api/cart/merge
+// @access  Private
+//
+// PHASE 5: this endpoint is load bearing, not a convenience.
+//
+// createOrder builds a signed-in user's order from the SERVER cart and ignores
+// any items in the request body (only guests may pass guestItems). A guest cart
+// therefore cannot survive login as localStorage alone: without this merge, a
+// guest who fills a basket and then signs in to pay arrives at checkout with an
+// empty server cart and a full local one.
+//
+// Merge rules, chosen to never destroy what the shopper already had:
+//   • quantities ADD for a line that already exists (same product + variant)
+//   • the guest's stale price is discarded; live price is re-read from the
+//     product, exactly as addItemToCart does
+//   • quantity is clamped to available stock rather than rejecting the whole
+//     merge, so one sold-out item cannot cost the shopper their entire basket
+//   • unknown or inactive products are skipped and reported back
+export const mergeGuestCart = async (req, res, next) => {
+    if (!req.user?.id) {
+        return res.status(401).json({ success: false, message: "Not authorized." });
+    }
+
+    const { items } = req.body;
+
+    if (!Array.isArray(items)) {
+        return res.status(400).json({ success: false, message: "items must be an array." });
+    }
+
+    // Nothing to merge is a success, not an error: the client calls this on
+    // every login regardless of whether a guest cart exists.
+    if (items.length === 0) {
+        const existing = await Cart.findOne({ user: req.user.id }).populate(
+            "items.product",
+            "name slug imageGroups variants hasVariants",
+        );
+        return res.status(200).json({
+            success: true,
+            cart: existing || { items: [], totalPrice: 0 },
+            merged: 0,
+            skipped: [],
+        });
+    }
+
+    try {
+        let cart = await Cart.findOne({ user: req.user.id });
+        if (!cart) cart = await Cart.create({ user: req.user.id, items: [] });
+
+        const skipped = [];
+        let merged = 0;
+
+        for (const incoming of items) {
+            const quantity = parseInt(incoming?.quantity, 10);
+            if (!incoming?.productId || !Number.isFinite(quantity) || quantity < 1) continue;
+
+            const product = await Product.findById(incoming.productId);
+            if (!product || product.isActive === false) {
+                skipped.push({ productId: incoming.productId, reason: "unavailable" });
+                continue;
+            }
+
+            // Resolve price and stock from the live product, never from the
+            // client payload — a guest cart sits in localStorage where anyone
+            // can edit the price.
+            let price = product.price;
+            let availableStock = product.stock;
+            let variantData = null;
+
+            const options = incoming.variant?.options;
+            if (Array.isArray(options) && options.length > 0) {
+                const variantItem = product.variants.find((v) =>
+                    options.every((opt) =>
+                        v.options.some(
+                            (vOpt) => vOpt.name === opt.name && vOpt.value === opt.value,
+                        ),
+                    ),
+                );
+
+                if (!variantItem) {
+                    skipped.push({ productId: incoming.productId, reason: "variant_missing" });
+                    continue;
+                }
+
+                price = variantItem.price;
+                availableStock = variantItem.stock;
+                variantData = {
+                    options,
+                    imageGroupName: variantItem.imageGroupName,
+                    displayName:
+                        incoming.variant.displayName ||
+                        options.map((o) => `${o.name}: ${o.value}`).join(", "),
+                    sku: variantItem.sku,
+                };
+            }
+
+            if (price == null || price <= 0) price = product.price || product.basePrice || 0;
+
+            // Same matching rule as addItemToCart: product id plus the option
+            // set, compared order-independently.
+            const existingItem = cart.items.find((item) => {
+                if (item.product.toString() !== String(incoming.productId)) return false;
+                if (!item.variant?.options?.length && !variantData) return true;
+                if (!item.variant?.options?.length || !variantData) return false;
+
+                const a = [...item.variant.options]
+                    .map((o) => `${o.name}:${o.value}`)
+                    .sort()
+                    .join("|");
+                const b = [...variantData.options]
+                    .map((o) => `${o.name}:${o.value}`)
+                    .sort()
+                    .join("|");
+                return a === b;
+            });
+
+            const cap = availableStock ?? Infinity;
+
+            if (existingItem) {
+                const target = existingItem.quantity + quantity;
+                const clamped = Math.min(target, cap);
+                if (clamped > existingItem.quantity) merged += clamped - existingItem.quantity;
+                existingItem.quantity = Math.max(1, clamped);
+                existingItem.priceAtPurchase = price;
+                existingItem.basePrice = product.basePrice || price;
+            } else {
+                const clamped = Math.min(quantity, cap);
+                if (clamped < 1) {
+                    skipped.push({ productId: incoming.productId, reason: "out_of_stock" });
+                    continue;
+                }
+                cart.items.push({
+                    product: incoming.productId,
+                    quantity: clamped,
+                    priceAtPurchase: price,
+                    basePrice: product.basePrice || price,
+                    discountPercentage: product.discountPercentage || 0,
+                    variant: variantData,
+                });
+                merged += clamped;
+            }
+        }
+
+        await cart.save();
+        await cart.populate("items.product", "name slug imageGroups variants hasVariants");
+
+        res.status(200).json({ success: true, cart, merged, skipped });
+    } catch (error) {
+        console.error("Cart merge error:", error.message);
+        next(error);
+    }
+};
+
 // @desc    Update item quantity in cart
 // @route   PUT /api/cart/:itemId
 // @access  Private

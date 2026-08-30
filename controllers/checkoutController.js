@@ -33,6 +33,42 @@ const shippingZoneToLocationType = (shippingZone) => {
 // @desc    Get all active districts
 // @route   GET /api/checkout/districts
 // @access  Public
+// @desc    Public shipping rate summary
+// @route   GET /api/checkout/shipping-rates
+// @access  Public
+//
+// PHASE 5: the cart drawer and cart page show a "spend X more for free
+// delivery" progress bar, which needs freeShippingThreshold BEFORE an address
+// exists. calculateCheckoutData cannot answer that: it requires a validated
+// district and upazila, which a shopper has not entered while still browsing.
+//
+// The admin rates endpoint holds this data but sits behind protect + adminOnly.
+// Nothing here is sensitive: every value is quoted to the customer at checkout
+// anyway. codChargeValue is deliberately excluded, since it is only meaningful
+// alongside the COD rules and would invite mis-display out of context.
+export const getPublicShippingRates = async (req, res) => {
+    try {
+        const rates = await ShippingRate.find({ isActive: true })
+            .select("locationType deliveryType baseCharge freeShippingThreshold reducedShippingThreshold reducedShippingAmount")
+            .lean();
+
+        // The lowest non-null threshold across zones is what a shopper can be
+        // promised before they have chosen where it is going.
+        const thresholds = rates
+            .map((r) => r.freeShippingThreshold)
+            .filter((t) => typeof t === "number" && t > 0);
+
+        res.status(200).json({
+            success: true,
+            rates,
+            lowestFreeShippingThreshold: thresholds.length ? Math.min(...thresholds) : null,
+        });
+    } catch (error) {
+        console.error("Public shipping rates error:", error.message);
+        res.status(500).json({ success: false, message: "Failed to fetch shipping rates" });
+    }
+};
+
 export const getDistricts = async (req, res) => {
     try {
         const districts = await District.find({ isActive: true }).sort({ name: 1 });
