@@ -2744,8 +2744,16 @@ export const searchProductsForAdmin = async (req, res) => {
         return res.status(200).json({ success: true, products: [] });
     }
     try {
+        // FIX: `q` is user input and was interpolated into a regex unescaped,
+        // unlike every other search in this file. That allows both a
+        // catastrophic-backtracking DoS and unintended matching. escapeRegex is
+        // already imported at the top and used by getAdminProducts.
+        const safe = escapeRegex(q);
         const products = await Product.find({
-            $or: [{ name: { $regex: q, $options: "i" } }, { sku: { $regex: q, $options: "i" } }],
+            $or: [
+                { name: { $regex: safe, $options: "i" } },
+                { sku: { $regex: safe, $options: "i" } },
+            ],
         })
             .select(
                 "_id name basePrice discountType discountValue price variants hasVariants imageGroups mainImage sku",

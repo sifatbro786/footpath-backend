@@ -16,6 +16,11 @@ dist-ssr
 # Uploads (user content, don't commit)
 uploads/*
 !uploads/.gitkeep
+# No seed imagery is stored here. An abandoned attempt pointed every category
+# at /uploads/seed/cat-*.svg and never generated the files, so the storefront
+# rendered thirteen broken tiles that re-seeding could not heal. Seed photos
+# are external URLs now, pinned and eyeballed in scripts/seedImages.js.
+
 
 # Editor directories and files
 .vscode/*

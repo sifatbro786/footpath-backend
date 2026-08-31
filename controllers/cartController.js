@@ -13,7 +13,12 @@ export const getCart = async (req, res, next) => {
     try {
         let cart = await Cart.findOne({ user: req.user.id }).populate({
             path: "items.product",
-            select: "name slug imageGroups variants hasVariants price basePrice discountPercentage stockStatus isActive",
+            // `stock` added (Phase fix): the storefront cart needs to know how
+            // many are left so the quantity stepper can stop at the ceiling.
+            // Without it every line reported unlimited stock, the shopper could
+            // click past what exists, and the server then rejected the update
+            // and snapped the number back, which reads as a broken control.
+            select: "name slug imageGroups variants hasVariants price basePrice stock discountPercentage stockStatus isActive",
         });
 
         if (!cart) {
@@ -112,7 +117,12 @@ export const getCart = async (req, res, next) => {
             await cart.save();
             await cart.populate({
                 path: "items.product",
-                select: "name slug imageGroups variants hasVariants price basePrice discountPercentage stockStatus isActive",
+                // `stock` added (Phase fix): the storefront cart needs to know how
+            // many are left so the quantity stepper can stop at the ceiling.
+            // Without it every line reported unlimited stock, the shopper could
+            // click past what exists, and the server then rejected the update
+            // and snapped the number back, which reads as a broken control.
+            select: "name slug imageGroups variants hasVariants price basePrice stock discountPercentage stockStatus isActive",
             });
         }
 
@@ -377,7 +387,7 @@ export const addItemToCart = async (req, res, next) => {
         await cart.save();
         cart = await Cart.findById(cart._id).populate(
             "items.product",
-            "name slug imageGroups variants hasVariants",
+            "name slug imageGroups variants hasVariants stock",
         );
         console.log("Cart saved successfully, total items:", cart.items.length);
 
@@ -433,7 +443,7 @@ export const mergeGuestCart = async (req, res, next) => {
     if (items.length === 0) {
         const existing = await Cart.findOne({ user: req.user.id }).populate(
             "items.product",
-            "name slug imageGroups variants hasVariants",
+            "name slug imageGroups variants hasVariants stock",
         );
         return res.status(200).json({
             success: true,
@@ -542,7 +552,7 @@ export const mergeGuestCart = async (req, res, next) => {
         }
 
         await cart.save();
-        await cart.populate("items.product", "name slug imageGroups variants hasVariants");
+        await cart.populate("items.product", "name slug imageGroups variants hasVariants stock");
 
         res.status(200).json({ success: true, cart, merged, skipped });
     } catch (error) {
@@ -616,7 +626,7 @@ export const updateCartItem = async (req, res, next) => {
 
         item.quantity = quantity;
         await cart.save();
-        await cart.populate("items.product", "name slug imageGroups variants hasVariants");
+        await cart.populate("items.product", "name slug imageGroups variants hasVariants stock");
 
         res.status(200).json({ success: true, cart });
     } catch (error) {
@@ -646,6 +656,6 @@ export const removeItemFromCart = asyncHandler(async (req, res) => {
 
     cart.items.pull({ _id: req.params.itemId });
     await cart.save();
-    await cart.populate("items.product", "name slug imageGroups variants hasVariants");
+    await cart.populate("items.product", "name slug imageGroups variants hasVariants stock");
     res.status(200).json({ success: true, cart });
 });
