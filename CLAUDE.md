@@ -103,8 +103,9 @@ have no token and are admin-only by design.
 `statusHistory.updatedBy` is an ObjectId ref. Passing the string `"system"` does
 not throw: Mongoose records a cast failure, and `save({ validateBeforeSave: false })`
 (used throughout the payment flow) discards it, so the field saves as `undefined`.
-Omit it for system entries instead. **Still present** in `adminNotes.addedBy` in
-`paymentController` and `orderController` — worth a sweep.
+Omit it for system entries instead. **Fixed** (swept): all `addedBy: "system"`
+and `updatedBy: "system"` in `paymentController` and `orderController` now omit
+the field. Keep it omitted for any new system-generated note or status entry.
 
 ### 7. Response envelopes are inconsistent
 
@@ -122,14 +123,17 @@ There is no single convention. Verify before consuming:
 | `/api/reviews/product/:id` | `{ success, reviews, ratingStats, ... }` |
 | A+ content admin | `{ success, aplusContents, pagination }` (`pages`, not `totalPages`) |
 
-### 8. Campaign pricing is not applied everywhere
+### 8. Campaign pricing — one resolver, applied everywhere (was: inconsistent)
 
-`getProducts` and `getProductBySlug` compute `finalPrice` /
-`isUnderValidCampaign` / `campaignInfo`. **`getFeaturedProducts` and
-`getHomepageSections` do not** — they derive discount from the base
-`discountType` only. So a featured product inside a live campaign shows its
-pre-campaign price on the homepage and the campaign price everywhere else. Fix
-belongs in those two controllers, not in the frontend mapper.
+**Fixed.** `resolveCampaignPricing(productObj)` in `productController.js` is now
+THE single source of truth for `finalPrice` / `isUnderValidCampaign` /
+`campaignInfo` / `discountAmount` / `isOnSale`. `getProducts`,
+`getFeaturedProducts` and `getHomepageSections` all route through it, so a
+featured/section product inside a live campaign shows the campaign price
+everywhere. It reads the embedded `campaignDiscount` subdoc + `isUnderCampaign`,
+so any new list endpoint MUST select those two fields and spread the resolver's
+result. Do not reintroduce a per-endpoint discount block. `getProductBySlug`
+still has its own inline copy (single-doc path) — fold it in if you touch it.
 
 ### 9. Category filtering does not walk the tree
 

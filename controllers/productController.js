@@ -19,6 +19,76 @@ const calculatePrice = (basePrice, discountType, discountValue) => {
     return base;
 };
 
+/**
+ * Canonical campaign-pricing resolver. THE single source of truth for turning a
+ * plain product object into its storefront pricing fields. `getProducts`,
+ * `getProductBySlug`, `getFeaturedProducts` and `getHomepageSections` all route
+ * through this so the same product can never show one price on the homepage and
+ * another on the catalogue (the bug this replaces).
+ *
+ * Accepts a plain object (`.toObject()` or `.lean()`), never a live Mongoose
+ * doc. Requires `basePrice`, `price`, `discountType`, `discountValue`, and —
+ * for campaign awareness — `isUnderCampaign` + the embedded `campaignDiscount`
+ * subdoc, so the caller's projection MUST select those two fields. Returns the
+ * enrichment fields only; spread them onto the product object at the call site.
+ */
+export const resolveCampaignPricing = (productObj) => {
+    let isUnderValidCampaign = false;
+    let campaignPrice = null;
+    let campaignInfo = null;
+    let finalPrice = productObj.price;
+    let finalDiscountType = productObj.discountType;
+    let finalDiscountValue = productObj.discountValue;
+
+    if (productObj.isUnderCampaign && productObj.campaignDiscount?.isActive) {
+        const now = new Date();
+        const campaignStart = productObj.campaignDiscount.startDate
+            ? new Date(productObj.campaignDiscount.startDate)
+            : null;
+        const campaignEnd = productObj.campaignDiscount.endDate
+            ? new Date(productObj.campaignDiscount.endDate)
+            : null;
+
+        if ((!campaignStart || campaignStart <= now) && (!campaignEnd || campaignEnd >= now)) {
+            isUnderValidCampaign = true;
+            campaignPrice = productObj.campaignDiscount.campaignPrice;
+            campaignInfo = {
+                campaignId: productObj.campaignDiscount.campaignId,
+                campaignName: productObj.campaignDiscount.campaignName,
+                discountType: productObj.campaignDiscount.discountType,
+                discountValue: productObj.campaignDiscount.discountValue,
+                campaignPrice: campaignPrice,
+                startDate: productObj.campaignDiscount.startDate,
+                endDate: productObj.campaignDiscount.endDate,
+            };
+
+            finalPrice = campaignPrice;
+            finalDiscountType = productObj.campaignDiscount.discountType;
+            finalDiscountValue = productObj.campaignDiscount.discountValue;
+        }
+    }
+
+    let discountAmount = 0;
+    if (finalDiscountType === "percentage" && finalDiscountValue > 0) {
+        discountAmount = (productObj.basePrice * finalDiscountValue) / 100;
+    } else if (finalDiscountType === "fixed" && finalDiscountValue > 0) {
+        discountAmount = finalDiscountValue;
+    }
+
+    if (isUnderValidCampaign && campaignPrice) {
+        discountAmount = productObj.basePrice - campaignPrice;
+    }
+
+    return {
+        finalPrice,
+        isUnderValidCampaign,
+        campaignInfo,
+        discountAmount,
+        isOnSale:
+            (finalDiscountType !== "none" && finalDiscountValue > 0) || isUnderValidCampaign,
+    };
+};
+
 export const createProduct = async (req, res) => {
     try {
         console.log("Received product data:", req.body);
@@ -546,66 +616,7 @@ export const getProducts = async (req, res) => {
         // Calculate discount amount for each product with campaign consideration
         const productsWithCampaign = products.map((product) => {
             const productObj = product.toObject();
-
-            let isUnderValidCampaign = false;
-            let campaignPrice = null;
-            let campaignInfo = null;
-            let finalPrice = productObj.price;
-            let finalDiscountType = productObj.discountType;
-            let finalDiscountValue = productObj.discountValue;
-
-            if (productObj.isUnderCampaign && productObj.campaignDiscount?.isActive) {
-                const now = new Date();
-                const campaignStart = productObj.campaignDiscount.startDate
-                    ? new Date(productObj.campaignDiscount.startDate)
-                    : null;
-                const campaignEnd = productObj.campaignDiscount.endDate
-                    ? new Date(productObj.campaignDiscount.endDate)
-                    : null;
-
-                if (
-                    (!campaignStart || campaignStart <= now) &&
-                    (!campaignEnd || campaignEnd >= now)
-                ) {
-                    isUnderValidCampaign = true;
-                    campaignPrice = productObj.campaignDiscount.campaignPrice;
-                    campaignInfo = {
-                        campaignId: productObj.campaignDiscount.campaignId,
-                        campaignName: productObj.campaignDiscount.campaignName,
-                        discountType: productObj.campaignDiscount.discountType,
-                        discountValue: productObj.campaignDiscount.discountValue,
-                        campaignPrice: campaignPrice,
-                        startDate: productObj.campaignDiscount.startDate,
-                        endDate: productObj.campaignDiscount.endDate,
-                    };
-
-                    finalPrice = campaignPrice;
-                    finalDiscountType = productObj.campaignDiscount.discountType;
-                    finalDiscountValue = productObj.campaignDiscount.discountValue;
-                }
-            }
-
-            let discountAmount = 0;
-            if (finalDiscountType === "percentage" && finalDiscountValue > 0) {
-                discountAmount = (productObj.basePrice * finalDiscountValue) / 100;
-            } else if (finalDiscountType === "fixed" && finalDiscountValue > 0) {
-                discountAmount = finalDiscountValue;
-            }
-
-            if (isUnderValidCampaign && campaignPrice) {
-                discountAmount = productObj.basePrice - campaignPrice;
-            }
-
-            return {
-                ...productObj,
-                finalPrice: finalPrice,
-                isUnderValidCampaign: isUnderValidCampaign,
-                campaignInfo: campaignInfo,
-                discountAmount: discountAmount,
-                isOnSale:
-                    (finalDiscountType !== "none" && finalDiscountValue > 0) ||
-                    isUnderValidCampaign,
-            };
+            return { ...productObj, ...resolveCampaignPricing(productObj) };
         });
 
         res.status(200).json({
@@ -1979,22 +1990,11 @@ export const getFeaturedProducts = async (req, res) => {
             .populate("category subCategory")
             .limit(10);
 
-        // Calculate discount amounts
+        // Campaign-aware pricing, same resolver as getProducts, so a featured
+        // product inside a live campaign shows its campaign price here too.
         const productsWithDiscount = products.map((product) => {
             const productObj = product.toObject();
-
-            let discountAmount = 0;
-            if (productObj.discountType === "percentage") {
-                discountAmount = (productObj.basePrice * productObj.discountValue) / 100;
-            } else if (productObj.discountType === "fixed") {
-                discountAmount = productObj.discountValue;
-            }
-
-            productObj.discountAmount = discountAmount;
-            productObj.isOnSale =
-                productObj.discountType !== "none" && productObj.discountValue > 0;
-
-            return productObj;
+            return { ...productObj, ...resolveCampaignPricing(productObj) };
         });
 
         res.status(200).json({
@@ -2468,7 +2468,7 @@ export const getHomepageSections = async (req, res) => {
 
                 const products = await Product.find(filter)
                     .select(
-                        "name slug price basePrice discountType discountValue imageGroups averageRating numReviews stock hasVariants",
+                        "name slug price basePrice discountType discountValue imageGroups averageRating numReviews stock hasVariants isUnderCampaign campaignDiscount",
                     )
                     .populate("category", "name slug")
                     .populate("subCategory", "name slug")
@@ -2476,21 +2476,12 @@ export const getHomepageSections = async (req, res) => {
                     .limit(section.productLimit || 8)
                     .lean();
 
-                // Calculate discount amounts
-                const productsWithDiscount = products.map((product) => {
-                    let discountAmount = 0;
-                    if (product.discountType === "percentage") {
-                        discountAmount = (product.basePrice * product.discountValue) / 100;
-                    } else if (product.discountType === "fixed") {
-                        discountAmount = product.discountValue;
-                    }
-
-                    return {
-                        ...product,
-                        discountAmount,
-                        isOnSale: product.discountType !== "none" && product.discountValue > 0,
-                    };
-                });
+                // Campaign-aware pricing, same resolver as getProducts, so a
+                // section product inside a live campaign shows its campaign price.
+                const productsWithDiscount = products.map((product) => ({
+                    ...product,
+                    ...resolveCampaignPricing(product),
+                }));
 
                 console.log(`Found ${products.length} products for section: ${section.title}`);
 

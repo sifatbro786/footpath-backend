@@ -400,7 +400,7 @@ export const createOrder = async (req, res, next) => {
                 newOrder.adminNotes = newOrder.adminNotes || [];
                 newOrder.adminNotes.push({
                     note: `SSLCommerz initialization failed: ${paymentInit.failedreason || "Unknown error"}`,
-                    addedBy: "system",
+                    // System entry: addedBy (ObjectId ref) omitted for a non-user actor.
                     addedAt: new Date(),
                 });
                 await newOrder.save({ session, validateBeforeSave: false });
@@ -451,7 +451,7 @@ export const createOrder = async (req, res, next) => {
                 newOrder.adminNotes = newOrder.adminNotes || [];
                 newOrder.adminNotes.push({
                     note: `COD payment: Customer needs to pay ${codChargeAmount} BDT online. Remaining ${remainingAmount} BDT will be collected upon delivery.`,
-                    addedBy: "system",
+                    // System entry: addedBy (ObjectId ref) omitted for a non-user actor.
                     addedAt: new Date(),
                 });
 
@@ -475,7 +475,7 @@ export const createOrder = async (req, res, next) => {
                 newOrder.adminNotes = newOrder.adminNotes || [];
                 newOrder.adminNotes.push({
                     note: `COD payment initialization failed: ${paymentInit.failedreason || "Unknown error"}`,
-                    addedBy: "system",
+                    // System entry: addedBy (ObjectId ref) omitted for a non-user actor.
                     addedAt: new Date(),
                 });
                 await newOrder.save({ session, validateBeforeSave: false });

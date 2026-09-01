@@ -149,7 +149,9 @@ export const processSuccessRedirect = async (req, res) => {
                 order.adminNotes = order.adminNotes || [];
                 order.adminNotes.push({
                     note: `COD charge of ${codPaidAmount} BDT paid online. Remaining ${remainingAmount} BDT to be collected upon delivery.`,
-                    addedBy: "system",
+                    // System entry: addedBy is an ObjectId ref, omitted for a
+                    // non-user actor. "system" cast-fails and, under
+                    // save({ validateBeforeSave: false }), persists as undefined.
                     addedAt: new Date(),
                 });
 
@@ -182,7 +184,7 @@ export const processSuccessRedirect = async (req, res) => {
                     order.paymentMethod === "COD"
                         ? `COD charge paid online. Order confirmed. Paid: ${order.codOnlinePaymentAmount}`
                         : "Full payment completed online",
-                updatedBy: "system",
+                // System entry: updatedBy (ObjectId ref) omitted for a non-user actor.
                 updatedAt: new Date(),
             });
 
@@ -200,7 +202,7 @@ export const processSuccessRedirect = async (req, res) => {
             order.statusHistory.push({
                 status: "Cancelled",
                 note: "Payment verification failed",
-                updatedBy: "system",
+                // System entry: updatedBy (ObjectId ref) omitted for a non-user actor.
                 updatedAt: new Date(),
             });
 
@@ -351,7 +353,9 @@ export const handleIPN = async (req, res) => {
                 order.adminNotes = order.adminNotes || [];
                 order.adminNotes.push({
                     note: `COD charge of ${codPaidAmount} BDT paid online. Remaining ${remainingAmount} BDT to be collected upon delivery.`,
-                    addedBy: "system",
+                    // System entry: addedBy is an ObjectId ref, omitted for a
+                    // non-user actor. "system" cast-fails and, under
+                    // save({ validateBeforeSave: false }), persists as undefined.
                     addedAt: new Date(),
                 });
             } else {
@@ -377,7 +381,7 @@ export const handleIPN = async (req, res) => {
                 note: isCODOrder
                     ? `COD charge paid online via IPN. Amount: ${order.codOnlinePaymentAmount}`
                     : "Full payment completed online via IPN",
-                updatedBy: "system",
+                // System entry: updatedBy (ObjectId ref) omitted for a non-user actor.
                 updatedAt: new Date(),
             });
 
@@ -396,7 +400,7 @@ export const handleIPN = async (req, res) => {
             order.statusHistory.push({
                 status: "Cancelled",
                 note: "Payment verification failed via IPN",
-                updatedBy: "system",
+                // System entry: updatedBy (ObjectId ref) omitted for a non-user actor.
                 updatedAt: new Date(),
             });
 
