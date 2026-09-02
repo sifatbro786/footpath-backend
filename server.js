@@ -97,7 +97,6 @@ const allowedOrigins = [
         ...envOrigins,
         "http://localhost:5173",
         "http://localhost:5174",
-        "https://footpath-frontend.vercel.app",
         "https://footpathbd.com",
         "https://www.footpathbd.com",
         "https://sandbox.sslcommerz.com",
