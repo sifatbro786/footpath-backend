@@ -1,6 +1,6 @@
 // controllers/heroContentController.js
 
-import asyncHandler from "express-async-handler"; // ধরে নিলাম আপনি এটি ব্যবহার করছেন
+import { asyncHandler } from "../utils/asyncHandler.js";
 import HeroContent from "../models/HeroContent.js";
 
 // @desc    Get all active hero content, grouped by device type
@@ -31,7 +31,21 @@ const getActiveHeroContent = asyncHandler(async (req, res) => {
         desktopImages,
         mobileVideos,
         mobileImages,
-        // Note: If you want to send the full object, you can group by deviceType only
+        // Additive: the URL lists above drop the
+        // admin-edited title/subtitle/button, so the storefront could never
+        // show them. Full items ride along without breaking old consumers.
+        items: activeContent.map((item) => ({
+            _id: item._id,
+            title: item.title,
+            subtitle: item.subtitle,
+            buttonText: item.buttonText,
+            buttonLink: item.buttonLink,
+            label: item.label,
+            mediaType: item.mediaType,
+            mediaUrl: item.mediaUrl,
+            deviceType: item.deviceType,
+            order: item.order,
+        })),
     });
 });
 
@@ -59,6 +73,7 @@ const createHeroContent = asyncHandler(async (req, res) => {
         deviceType,
         order,
         isActive,
+        label,
     } = req.body;
 
     const newContent = new HeroContent({
@@ -71,6 +86,7 @@ const createHeroContent = asyncHandler(async (req, res) => {
         deviceType,
         order: order || 0,
         isActive: isActive !== undefined ? isActive : true,
+        label: label || "",
     });
 
     const createdContent = await newContent.save();
@@ -91,6 +107,7 @@ const updateHeroContent = asyncHandler(async (req, res) => {
         deviceType,
         order,
         isActive,
+        label,
     } = req.body;
     const content = await HeroContent.findById(req.params.id);
 
@@ -99,6 +116,7 @@ const updateHeroContent = asyncHandler(async (req, res) => {
         content.subtitle = subtitle || content.subtitle;
         content.buttonText = buttonText !== undefined ? buttonText : content.buttonText;
         content.buttonLink = buttonLink !== undefined ? buttonLink : content.buttonLink;
+        content.label = label !== undefined ? label : content.label;
         content.mediaType = mediaType || content.mediaType;
         content.mediaUrl = mediaUrl || content.mediaUrl;
         content.deviceType = deviceType || content.deviceType;

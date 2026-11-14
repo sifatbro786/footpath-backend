@@ -43,6 +43,11 @@ const shippingRateSchema = new mongoose.Schema(
             enum: ["Home Delivery", "Courier"],
         },
         baseCharge: { type: Number, required: true, default: 0 },
+        // Weight-based shipping: baseCharge covers the first baseWeightKg,
+        // then perKgCharge per started extra kg. perKgCharge 0 = flat charge
+        // (the base behaviour), so old rate docs keep working unchanged.
+        baseWeightKg: { type: Number, min: 0, default: 0 },
+        perKgCharge: { type: Number, min: 0, default: 0 },
         codChargeType: {
             type: String,
             enum: ["fixed", "percentage"],

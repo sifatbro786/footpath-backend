@@ -4,10 +4,14 @@ import Cart from "../models/Cart.js";
 import Order from "../models/Order.js";
 import Product from "../models/Product.js";
 import { computeOrderTotals } from "../services/pricingService.js";
+import { priceLines } from "../services/lineItemPricing.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
 import { incrementCouponUsage } from "./couponController.js";
 
 import { initializePayment } from "../config/sslcommerz.js";
+import { checkDeliveryChoice } from "../services/deliveryOptions.js";
+import { recordCustomerFromOrder } from "../services/customerSync.js";
+import { recordMovements } from "../services/stockLedger.js";
 
 // NOTE (Phase 3 cleanup): a dead `calculateShippingPrice()` function used to live
 // here — hardcoded to different, stale values (50/70/130) that didn't match the
@@ -25,7 +29,7 @@ import { initializePayment } from "../config/sslcommerz.js";
 // stock MUST check against this list — comparing against "Cancelled" alone (the old
 // behavior) incorrectly restores stock for orders that were still "Pending" and never
 // had stock removed in the first place, silently inflating inventory.
-const STOCK_HELD_STATUSES = ["Confirmed", "Processing", "Shipped", "Delivered", "Refunded"];
+export const STOCK_HELD_STATUSES = ["Confirmed", "Processing", "Shipped", "Delivered", "Refunded"];
 
 const ADMIN_ROLES = ["admin", "executive"];
 
@@ -60,8 +64,22 @@ const toClientOrder = (orderDoc) => {
 };
 
 // Product Stock Update
-export const updateProductStock = async (orderItems, action = "decrease", session = null) => {
+// `meta` feeds the stock ledger (models/StockMovement.js):
+//   { order?: {_id, orderNumber}, by?: userId, type?: "order"|"order_cancel"|..., note? }
+// Every product change below is one atomic findOneAndUpdate that returns the
+// document BEFORE the change, which is where the ledger's `before` comes from.
+export const updateProductStock = async (orderItems, action = "decrease", session = null, meta = {}) => {
     const opts = session ? { session } : {};
+    const ledger = [];
+    const type = meta.type || (action === "decrease" ? "order" : "order_cancel");
+    const base = {
+        type,
+        order: meta.order?._id || null,
+        orderNumber: meta.order?.orderNumber,
+        note: meta.note,
+        by: meta.by,
+    };
+
     for (const item of orderItems) {
         const delta = action === "decrease" ? -item.quantity : item.quantity;
 
@@ -102,24 +120,38 @@ export const updateProductStock = async (orderItems, action = "decrease", sessio
             const query = { _id: item.product };
             if (delta < 0) query[path] = { $gte: -delta };
             const result = await Product.findOneAndUpdate(query, { $inc: { [path]: delta } }, opts);
+            const options = product.variants[variantIndex].options.map(({ name, value }) => ({ name, value }));
+            const row = { ...base, product: item.product, productName: item.name, variantOptions: options, variantLabel: options.map((o) => o.value).join(" / ") };
             if (!result && delta < 0) {
                 console.warn(
                     `updateProductStock: insufficient variant stock for product ${item.product} — clamping to 0.`,
                 );
-                await Product.updateOne({ _id: item.product }, { $set: { [path]: 0 } }, opts);
+                const prev = await Product.findOneAndUpdate({ _id: item.product }, { $set: { [path]: 0 } }, opts);
+                const before = prev?.variants?.[variantIndex]?.stock ?? 0;
+                ledger.push({ ...row, change: -before, before, after: 0, note: `${base.note || ""} Wanted ${-delta}, only ${before} in stock (oversold).`.trim() });
+            } else if (result) {
+                const before = result.variants?.[variantIndex]?.stock ?? 0;
+                ledger.push({ ...row, change: delta, before, after: before + delta });
             }
         } else {
             const query = { _id: item.product };
             if (delta < 0) query.stock = { $gte: -delta };
             const result = await Product.findOneAndUpdate(query, { $inc: { stock: delta } }, opts);
+            const row = { ...base, product: item.product, productName: item.name };
             if (!result && delta < 0) {
                 console.warn(
                     `updateProductStock: insufficient stock for product ${item.product} — clamping to 0.`,
                 );
-                await Product.updateOne({ _id: item.product }, { $set: { stock: 0 } }, opts);
+                const prev = await Product.findOneAndUpdate({ _id: item.product }, { $set: { stock: 0 } }, opts);
+                const before = prev?.stock ?? 0;
+                ledger.push({ ...row, change: -before, before, after: 0, note: `${base.note || ""} Wanted ${-delta}, only ${before} in stock (oversold).`.trim() });
+            } else if (result) {
+                const before = result.stock ?? 0;
+                ledger.push({ ...row, change: delta, before, after: before + delta });
             }
         }
     }
+    await recordMovements(ledger, session);
 };
 
 // @desc    Create a new order
@@ -154,26 +186,18 @@ export const createOrder = async (req, res, next) => {
         }
 
         // ─── deliveryType validation ──────────────────────────────────────────────
+        // Same rule as the checkout preview (services/deliveryOptions.js):
+        // offered types come from active rates + the district's courier branches.
         let finalDeliveryType = deliveryType;
-        const isHomeOnly = locationType === "dhaka_inside" || locationType === "dhaka_sub";
-
-        if (isHomeOnly) {
-            // Dhaka Inside ও Dhaka Sub —
-            if (finalDeliveryType && finalDeliveryType === "Courier") {
-                validationErrors.push(
-                    `Courier service not available for ${locationType === "dhaka_inside" ? "Dhaka Inside" : "Dhaka Sub"}`,
-                );
-            }
-            finalDeliveryType = "Home Delivery";
-        } else if (locationType === "outside_dhaka") {
-            if (!finalDeliveryType || !["Courier", "Home Delivery"].includes(finalDeliveryType)) {
-                validationErrors.push(
-                    "Valid delivery type is required for outside Dhaka (Courier/Home Delivery)",
-                );
-            }
-            if (finalDeliveryType === "Courier" && !courierBranch) {
-                validationErrors.push("Courier branch selection is required");
-            }
+        if (locationType && validLocationTypes.includes(locationType)) {
+            const delivery = await checkDeliveryChoice({
+                locationType,
+                district: shippingAddress?.district,
+                deliveryType,
+                courierBranch,
+            });
+            if (delivery.ok) finalDeliveryType = delivery.deliveryType;
+            else validationErrors.push(delivery.message);
         }
 
         // ─── paymentMethod validation ─────────────────────────────────────────────
@@ -208,95 +232,67 @@ export const createOrder = async (req, res, next) => {
             });
         }
 
-        const isCOD = paymentMethod === "COD";
-
-        // ─── Order Items ──────────────────────────────────────────────────────────
-        let finalOrderItems = [];
+        // ─── Order Items: priced from the live Product only ───────────────────────
+        // FIX (critical, price-tampering): guest lines used to take
+        // item.price / item.priceAtPurchase straight from the request (i.e. from
+        // localStorage), so a guest could order anything for 1 BDT. Signed-in
+        // lines used the cart's stored priceAtPurchase, which went stale when a
+        // campaign changed. Every line now goes through
+        // services/lineItemPricing.js (live price, stock, weight).
+        let rawItems;
         let user = null;
 
         if (isGuest) {
-            finalOrderItems = guestItems.map((item) => {
-                const variantData = convertVariantToOrderFormat(item.variant);
-                return {
-                    name: item.name,
-                    product: item.productId,
-                    variant: variantData,
-                    quantity: parseInt(item.quantity) || 1,
-                    price: parseFloat(item.priceAtPurchase || item.price || 0),
-                    image: item.image || "",
-                };
-            });
+            rawItems = guestItems;
         } else {
             if (!req.user) {
                 await session.abortTransaction();
                 return res.status(401).json({ success: false, message: "Authentication required" });
             }
-
             user = req.user.id;
-            const cart = await Cart.findOne({ user })
-                .session(session)
-                .populate("items.product", "name slug imageGroups variants hasVariants");
-
+            const cart = await Cart.findOne({ user }).session(session).lean();
             if (!cart || cart.items.length === 0) {
                 await session.abortTransaction();
                 return res.status(400).json({ success: false, message: "Cart is empty" });
             }
-
-            finalOrderItems = cart.items.map((item) => {
-                const variantData = convertVariantToOrderFormat(item.variant);
-                const product = item.product;
-                let imageUrl = "";
-
-                if (item.imageGroupName && product.imageGroups) {
-                    const variantImageGroup = product.imageGroups.find(
-                        (group) => group.name === item.imageGroupName,
-                    );
-                    if (variantImageGroup?.images.length > 0) {
-                        imageUrl = variantImageGroup.images[0].url;
-                    }
-                }
-
-                if (!imageUrl && product.imageGroups?.length > 0) {
-                    const mainGroup =
-                        product.imageGroups.find((g) => g.name === "Main") ||
-                        product.imageGroups[0];
-                    if (mainGroup?.images.length > 0) imageUrl = mainGroup.images[0].url;
-                }
-
-                return {
-                    name: getOrderItemName(product.name, item.variant, item.variantDisplayName),
-                    product: product._id,
-                    variant: variantData,
-                    quantity: parseInt(item.quantity) || 1,
-                    price: parseFloat(item.priceAtPurchase || 0),
-                    image: imageUrl,
-                };
-            });
+            rawItems = cart.items;
         }
 
-        // ─── Price Calculation ────────────────────────────────────────────────────
-        // FIX (critical, price-tampering): shippingPrice/taxPrice/discountAmount/
-        // codCharge/codOnlinePaymentAmount/remainingAmount used to come straight
-        // from req.body and were trusted as-is. They are now always recomputed
-        // server-side via the same logic the checkout-preview endpoint uses
-        // (services/pricingService.js) — nothing price-related is accepted from
-        // the client here.
-        const itemsPrice = finalOrderItems.reduce(
-            (acc, item) => acc + item.price * item.quantity,
-            0,
-        );
+        const priced = await priceLines(rawItems, { session });
+        if (!priced.ok) {
+            await session.abortTransaction();
+            return res
+                .status(priced.status)
+                .json({ success: false, message: priced.message, errors: priced.errors });
+        }
 
+        // Online only when the bag holds a product marked codAllowed: false.
+        const effectivePaymentMethod = !priced.codAvailable ? "SSLCommerz" : paymentMethod;
+        const isCOD = effectivePaymentMethod === "COD";
+
+        const finalOrderItems = priced.lines.map((l) => ({
+            name: l.name,
+            product: l.product,
+            variant: l.variant,
+            quantity: l.quantity,
+            price: l.price,
+            retailPrice: l.retailPrice,
+            weightKg: l.weightKg,
+            image: l.image,
+        }));
+
+        // ─── Price Calculation ────────────────────────────────────────────────────
+        // shipping/tax/discount/COD are recomputed server side via the
+        // same function the checkout preview uses; nothing is read from the body.
         const pricing = await computeOrderTotals({
-            itemsSubtotal: itemsPrice,
+            itemsSubtotal: priced.itemsSubtotal,
             couponCode,
             userId: isGuest ? null : user,
             locationType,
             deliveryType: finalDeliveryType,
             isCOD,
-            // FIX: previously omitted — appliesTo="products"/"categories" coupon
-            // restrictions could not be checked without item-level product data,
-            // so real order creation ignored them entirely (see pricingService.js).
-            items: finalOrderItems,
+            items: priced.lines,
+            totalWeightKg: priced.totalWeightKg,
         });
 
         if (!pricing.ok) {
@@ -333,7 +329,8 @@ export const createOrder = async (req, res, next) => {
                 deliveryType: finalDeliveryType,
                 courierBranch: finalDeliveryType === "Courier" ? courierBranch : undefined,
             },
-            paymentMethod,
+            paymentMethod: effectivePaymentMethod,
+            totalWeightKg: priced.totalWeightKg,
             shippingPrice: finalShippingPrice,
             taxPrice: finalTaxPrice,
             couponCode: couponCode || undefined,
@@ -342,7 +339,7 @@ export const createOrder = async (req, res, next) => {
             orderStatus: "Pending",
             paymentStatus: "Pending",
             shippingBreakdown: {
-                flatCharge: finalShippingPrice,
+                ...(pricing.shippingBreakdown || {}),
                 totalQuantity: finalOrderItems.reduce((acc, i) => acc + i.quantity, 0),
                 totalShipping: finalShippingPrice,
             },
@@ -355,9 +352,10 @@ export const createOrder = async (req, res, next) => {
         await newOrder.save({ session, validateBeforeSave: false });
 
         // ─── SSLCommerz Payment ───────────────────────────────────────────────────
-        if (paymentMethod === "SSLCommerz") {
+        if (effectivePaymentMethod === "SSLCommerz") {
+            const amountNow = totalPrice;
             const paymentData = {
-                amount: totalPrice,
+                amount: amountNow,
                 cus_name: shippingAddress.name,
                 cus_email: shippingAddress.email || newOrder.guestEmail || "customer@example.com",
                 cus_phone: shippingAddress.phone,
@@ -371,7 +369,7 @@ export const createOrder = async (req, res, next) => {
             };
 
             console.log(
-                `SSLCommerz Payment Initializing: ${totalPrice} BDT for order ${newOrder._id}`,
+                `SSLCommerz Payment Initializing: ${amountNow} BDT for order ${newOrder.orderNumber || newOrder._id}`,
             );
             const paymentInit = await initializePayment(newOrder._id.toString(), paymentData);
 
@@ -380,6 +378,7 @@ export const createOrder = async (req, res, next) => {
                     await Cart.findOneAndDelete({ user: req.user.id }).session(session);
                 }
                 await session.commitTransaction();
+                recordCustomerFromOrder(newOrder); // lead book, best effort
                 // FIX: usedCount was never incremented anywhere in the codebase,
                 // so maxUsage limits were effectively unenforced. Done outside the
                 // transaction (best-effort, non-blocking) after commit succeeds.
@@ -412,7 +411,7 @@ export const createOrder = async (req, res, next) => {
             }
 
             // ─── COD Payment ──────────────────────────────────────────────────────────
-        } else if (paymentMethod === "COD") {
+        } else if (effectivePaymentMethod === "COD") {
             // FIX (critical, price-tampering): these three values used to be
             // re-derived from req.body.codOnlinePaymentAmount / req.body.codCharge /
             // req.body.remainingAmount. They're already correct on `newOrder`
@@ -457,6 +456,7 @@ export const createOrder = async (req, res, next) => {
 
                 await newOrder.save({ session, validateBeforeSave: false });
                 await session.commitTransaction();
+                recordCustomerFromOrder(newOrder); // lead book, best effort
                 if (couponCode) incrementCouponUsage(couponCode);
                 return res.status(201).json({
                     success: true,
@@ -505,57 +505,6 @@ export const createOrder = async (req, res, next) => {
     } finally {
         session.endSession();
     }
-};
-
-/**
- * converting Variant data to orders.
- */
-const convertVariantToOrderFormat = (variant) => {
-    if (!variant || Object.keys(variant).length === 0) {
-        return undefined;
-    }
-
-    // full options array (current cart shape) — preserve ALL attributes, not just the first
-    if (variant.options && Array.isArray(variant.options) && variant.options.length > 0) {
-        return {
-            options: variant.options.map((opt) => ({ name: opt.name, value: opt.value })),
-            displayName:
-                variant.displayName ||
-                variant.options.map((opt) => `${opt.name}: ${opt.value}`).join(", "),
-            sku: variant.sku || undefined,
-        };
-    }
-
-    // legacy single name/value shape (older clients / imported data)
-    if (variant.name || variant.value) {
-        return {
-            options: [{ name: variant.name || "Variant", value: variant.value || "Default" }],
-            displayName: `${variant.name || "Variant"}: ${variant.value || "Default"}`,
-            sku: variant.sku || undefined,
-        };
-    }
-
-    return undefined;
-};
-
-/**
- * creating order items name with variant details for better order summary
- */
-const getOrderItemName = (productName, variant, variantDisplayName) => {
-    let itemName = productName;
-
-    if (variantDisplayName) {
-        itemName += ` - ${variantDisplayName}`;
-    } else if (variant && variant.options && Array.isArray(variant.options)) {
-        const variantText = variant.options.map((opt) => `${opt.name}: ${opt.value}`).join(", ");
-        if (variantText) {
-            itemName += ` - ${variantText}`;
-        }
-    } else if (variant && (variant.name || variant.value)) {
-        itemName += ` - ${variant.name || "Variant"}: ${variant.value || "Default"}`;
-    }
-
-    return itemName;
 };
 
 // @desc    Look up an order by number + phone, for guests
@@ -618,6 +567,8 @@ export const trackOrder = async (req, res, next) => {
                 statusHistory: order.statusHistory,
                 orderItems: order.orderItems,
                 totalPrice: order.totalPrice,
+                codOnlinePaymentAmount: order.codOnlinePaymentAmount,
+                totalWeightKg: order.totalWeightKg,
                 shippingPrice: order.shippingPrice,
                 discountAmount: order.discountAmount,
                 taxPrice: order.taxPrice,
@@ -747,6 +698,8 @@ export const getAllOrders = async (req, res, next) => {
         if (status && status !== "all") filter.orderStatus = status;
         if (paymentMethod && paymentMethod !== "all") filter.paymentMethod = paymentMethod;
         if (paymentStatus && paymentStatus !== "all") filter.paymentStatus = paymentStatus;
+        // Phone orders vs website orders (?source=phone|web).
+        if (req.query.source === "phone" || req.query.source === "web") filter.orderSource = req.query.source;
 
         // Search functionality
         if (search) {
@@ -758,9 +711,10 @@ export const getAllOrders = async (req, res, next) => {
             ];
         }
 
-        // Sort
-        const sort = {};
-        sort[sortBy] = sortOrder === "desc" ? -1 : 1;
+        // Sort. Whitelisted: the key comes from the query string.
+        const SORTABLE = ["createdAt", "totalPrice"];
+        const sort = { [SORTABLE.includes(sortBy) ? sortBy : "createdAt"]: sortOrder === "desc" ? -1 : 1 };
+        if (!sort.createdAt) sort.createdAt = -1;
 
         // Execute query
         const orders = await Order.find(filter)
@@ -789,19 +743,20 @@ export const getAllOrders = async (req, res, next) => {
 // @access  Private/Admin
 export const getOrderStats = async (req, res, next) => {
     try {
-        const totalOrders = await Order.countDocuments();
-        const pendingOrders = await Order.countDocuments({ orderStatus: "Pending" });
-        const deliveredOrders = await Order.countDocuments({ orderStatus: "Delivered" });
+        const scope = {};
+        const totalOrders = await Order.countDocuments(scope);
+        const pendingOrders = await Order.countDocuments({ ...scope, orderStatus: "Pending" });
+        const deliveredOrders = await Order.countDocuments({ ...scope, orderStatus: "Delivered" });
         const totalRevenue = await Order.aggregate([
-            { $match: { orderStatus: "Delivered" } },
+            { $match: { ...scope, orderStatus: "Delivered" } },
             { $group: { _id: null, total: { $sum: "$totalPrice" } } },
         ]);
-
         // Last 7 days orders
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
         const recentOrders = await Order.countDocuments({
+            ...scope,
             createdAt: { $gte: sevenDaysAgo },
         });
 
@@ -810,6 +765,7 @@ export const getOrderStats = async (req, res, next) => {
         const monthlyRevenue = await Order.aggregate([
             {
                 $match: {
+                    ...scope,
                     orderStatus: "Delivered",
                     createdAt: { $gte: new Date(new Date().getFullYear(), currentMonth, 1) },
                 },
@@ -933,10 +889,10 @@ export const updateOrderStatus = async (req, res, next) => {
         const willHoldStock = STOCK_HELD_STATUSES.includes(status);
         if (wasStockHeld && !willHoldStock) {
             console.log("Restoring product stock — order left a stock-held status");
-            await updateProductStock(order.orderItems, "increase");
+            await updateProductStock(order.orderItems, "increase", null, { order, by: req.user._id, note: `Status ${order.orderStatus} -> ${status}` });
         } else if (!wasStockHeld && willHoldStock) {
             console.log("Decrementing product stock — order entered a stock-held status");
-            await updateProductStock(order.orderItems, "decrease");
+            await updateProductStock(order.orderItems, "decrease", null, { order, by: req.user._id, note: `Status ${order.orderStatus} -> ${status}` });
         }
         console.log("Order status update completed");
         res.status(200).json({
@@ -981,7 +937,7 @@ export const updatePaymentStatus = async (req, res, next) => {
         }
 
         // Validate payment status
-        const validStatuses = ["Pending", "Paid", "Failed", "Refunded"];
+        const validStatuses = ["Pending", "Partial", "Paid", "Failed", "Refunded"];
         if (!validStatuses.includes(paymentStatus)) {
             return res.status(400).json({
                 success: false,
@@ -1090,7 +1046,7 @@ export const deleteOrder = async (req, res, next) => {
         // deleted never had stock decremented, so restoring it here used to inflate
         // inventory. Only restore when the order was actually holding stock.
         if (STOCK_HELD_STATUSES.includes(order.orderStatus)) {
-            await updateProductStock(order.orderItems, "increase");
+            await updateProductStock(order.orderItems, "increase", null, { order, by: req.user._id, note: "Order deleted" });
         }
         await Order.findByIdAndDelete(req.params.id);
         res.status(200).json({
@@ -1190,8 +1146,8 @@ export const updateOrderDetails = async (req, res, next) => {
             // Pending orders never had stock decremented, so item edits on them correctly
             // leave stock untouched.
             if (STOCK_HELD_STATUSES.includes(order.orderStatus)) {
-                await updateProductStock(order.orderItems, "increase", session);
-                await updateProductStock(newOrderItems, "decrease", session);
+                await updateProductStock(order.orderItems, "increase", session, { order, by: req.user._id, note: "Items edited (old lines)" });
+                await updateProductStock(newOrderItems, "decrease", session, { order, by: req.user._id, note: "Items edited (new lines)" });
             }
 
             order.orderItems = newOrderItems;

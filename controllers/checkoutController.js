@@ -1,10 +1,8 @@
 import Cart from "../models/Cart.js";
 import { CourierBranch, District, ShippingRate } from "../models/ShippingConfig.js";
-import {
-    applyCouponLogic,
-    calculateCODCharge,
-    isHomeDeliveryOnly,
-} from "../services/pricingService.js";
+import { applyCouponLogic, computeOrderTotals } from "../services/pricingService.js";
+import { checkDeliveryChoice, findCourierRecord, resolveDeliveryOptions } from "../services/deliveryOptions.js";
+import { priceLines } from "../services/lineItemPricing.js";
 
 // ─── Zone Helpers ─────────────────────────────────────────────────────────────
 
@@ -15,7 +13,7 @@ import {
  *   dhaka_outside → outside_dhaka
  *   other_district→ outside_dhaka
  */
-const shippingZoneToLocationType = (shippingZone) => {
+export const shippingZoneToLocationType = (shippingZone) => {
     switch (shippingZone) {
         case "dhaka_city":
             return "dhaka_inside";
@@ -49,7 +47,7 @@ const shippingZoneToLocationType = (shippingZone) => {
 export const getPublicShippingRates = async (req, res) => {
     try {
         const rates = await ShippingRate.find({ isActive: true })
-            .select("locationType deliveryType baseCharge freeShippingThreshold reducedShippingThreshold reducedShippingAmount")
+            .select("locationType deliveryType baseCharge baseWeightKg perKgCharge freeShippingThreshold reducedShippingThreshold reducedShippingAmount")
             .lean();
 
         // The lowest non-null threshold across zones is what a shopper can be
@@ -106,40 +104,13 @@ export const getUpazilas = async (req, res) => {
 // @access  Public
 export const getCourierBranches = async (req, res) => {
     try {
-        const { district } = req.params;
-
-        console.log("🔍 Searching for district:", district);
-
-        const record = await CourierBranch.findOne({
-            district: { $regex: new RegExp(`^${district}$`, "i") },
-            isActive: true,
-        });
-
-        if (record) {
-            console.log("✅ Found:", record.district, "Branches:", record.branches);
-            return res.status(200).json({
-                success: true,
-                branches: record.branches,
-            });
-        }
-
-        const allActive = await CourierBranch.find({ isActive: true }).select("district");
-        console.log(
-            "📋 Available districts with courier service:",
-            allActive.map((r) => r.district),
-        );
-
-        res.status(200).json({
-            success: true,
-            branches: [],
-        });
+        // Escaped, case-insensitive lookup (the base built a RegExp straight
+        // from the URL param) and no console noise per request.
+        const record = await findCourierRecord(req.params.district);
+        res.status(200).json({ success: true, branches: record?.branches || [] });
     } catch (error) {
-        console.error("❌ Error:", error);
-        res.status(500).json({
-            success: false,
-            message: "Failed to fetch courier branches",
-            branches: [],
-        });
+        console.error("Get courier branches error:", error.message);
+        res.status(500).json({ success: false, message: "Failed to fetch courier branches", branches: [] });
     }
 };
 
@@ -169,9 +140,7 @@ export const validateLocation = async (req, res) => {
 
         const locationType = shippingZoneToLocationType(upazilaObj.shippingZone);
 
-        const availableDeliveryTypes = isHomeDeliveryOnly(locationType)
-            ? ["Home Delivery"]
-            : ["Courier", "Home Delivery"];
+        const { types: availableDeliveryTypes } = await resolveDeliveryOptions({ locationType, district });
 
         res.status(200).json({
             success: true,
@@ -215,9 +184,7 @@ export const validateLocationType = async (req, res) => {
             success: true,
             locationType,
             shippingZone: upazilaObj.shippingZone,
-            availableDeliveryTypes: isHomeDeliveryOnly(locationType)
-                ? ["Home Delivery"]
-                : ["Courier", "Home Delivery"],
+            availableDeliveryTypes: (await resolveDeliveryOptions({ locationType, district })).types,
         });
     } catch (error) {
         console.error("Validate location type error:", error);
@@ -228,6 +195,11 @@ export const validateLocationType = async (req, res) => {
 // @desc    Calculate checkout totals (shipping, discount, tax, final total)
 // @route   POST /api/checkout/calculate
 // @access  Public / Private
+//
+// Display-only mirror of createOrder. Both run lineItemPricing.priceLines +
+// pricingService.computeOrderTotals, so the preview and the charge cannot
+// drift. The base version priced guest lines from guestItems[].price (client
+// controlled) and carried its own copy of the shipping/COD/tax maths.
 export const calculateCheckoutData = async (req, res, next) => {
     try {
         const {
@@ -243,56 +215,37 @@ export const calculateCheckoutData = async (req, res, next) => {
 
         const userId = req.user?.id;
 
-        // ─── Step 1: Items ────────────────────────────────────────────────
-        let itemsToProcess = [];
-
+        // ─── Step 1: Raw items (prices are NOT read from here) ────────────
+        let rawItems = [];
         if (isGuest) {
-            if (!guestItems || guestItems.length === 0) {
+            if (!Array.isArray(guestItems) || guestItems.length === 0) {
                 return res.status(400).json({
                     success: false,
                     message: "No items provided for calculation",
                 });
             }
-            itemsToProcess = guestItems;
+            rawItems = guestItems;
         } else {
             if (!req.user) {
-                return res.status(401).json({
-                    success: false,
-                    message: "Authentication required",
-                });
+                return res.status(401).json({ success: false, message: "Authentication required" });
             }
-            const cart = await Cart.findOne({ user: req.user.id }).populate("items.product");
+            const cart = await Cart.findOne({ user: req.user.id }).lean();
             if (!cart || cart.items.length === 0) {
                 return res.status(400).json({ success: false, message: "Cart is empty" });
             }
-            itemsToProcess = cart.items;
+            rawItems = cart.items;
         }
 
-        // ─── Step 2: Subtotal ──────────────────────────────────────────────
-        const itemsSubtotal = itemsToProcess.reduce(
-            (acc, item) =>
-                acc + parseFloat(item.priceAtPurchase || item.price || 0) * (item.quantity || 1),
-            0,
-        );
-
-        // ─── Step 3: Coupon ────────────────────────────────────────────────
-        let discountAmount = 0;
-        let isFreeShippingByCoupon = false;
-        let couponMessage = "";
-
-        if (couponCode) {
-            const couponResult = await applyCouponLogic(
-                couponCode.toUpperCase(),
-                itemsSubtotal,
-                userId,
-                itemsToProcess,
-            );
-            discountAmount = couponResult.discountAmount;
-            isFreeShippingByCoupon = couponResult.isFreeShipping;
-            couponMessage = couponResult.validationMessage;
+        // ─── Step 2: Server-side line pricing ─────────────────────────────
+        const priced = await priceLines(rawItems);
+        if (!priced.ok) {
+            return res
+                .status(priced.status)
+                .json({ success: false, message: priced.message, errors: priced.errors });
         }
+        const { lines, itemsSubtotal, totalWeightKg } = priced;
 
-        // ─── Step 4: locationType validation ──────────────────────────────
+        // ─── Step 3: locationType / deliveryType / payment validation ─────
         const validLocationTypes = ["dhaka_inside", "dhaka_sub", "outside_dhaka"];
         if (!locationType || !validLocationTypes.includes(locationType)) {
             return res.status(400).json({
@@ -302,67 +255,77 @@ export const calculateCheckoutData = async (req, res, next) => {
             });
         }
 
-        // ─── Step 5: deliveryType validation ──────────────────────────────
-        let finalDeliveryType = deliveryType;
-
-        if (isHomeDeliveryOnly(locationType)) {
-            if (deliveryType && deliveryType === "Courier") {
-                return res.status(400).json({
-                    success: false,
-                    message: `Courier service not available for ${locationType === "dhaka_inside" ? "Dhaka Inside" : "Dhaka Sub"}`,
-                });
-            }
-            finalDeliveryType = "Home Delivery";
-        } else {
-            if (!deliveryType || !["Courier", "Home Delivery"].includes(deliveryType)) {
-                return res.status(400).json({
-                    success: false,
-                    message:
-                        "Valid delivery type is required for outside Dhaka (Courier/Home Delivery)",
-                });
-            }
-            if (deliveryType === "Courier" && !courierBranch) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Courier branch selection is required",
-                });
-            }
-            finalDeliveryType = deliveryType;
+        // Offered types come from admin data (rates + courier branches), not a
+        // hard coded Dhaka rule. See services/deliveryOptions.js.
+        const delivery = await checkDeliveryChoice({
+            locationType,
+            district: shippingAddress?.district,
+            deliveryType,
+            courierBranch,
+        });
+        if (!delivery.ok) {
+            return res.status(400).json({ success: false, message: delivery.message });
         }
+        const finalDeliveryType = delivery.deliveryType;
 
-        // ─── Step 6: Payment method validation ────────────────────────────
         if (!paymentMethod || !["COD", "SSLCommerz"].includes(paymentMethod)) {
             return res.status(400).json({
                 success: false,
                 message: "Valid payment method is required (COD/SSLCommerz)",
             });
         }
+        // Online only when the bag holds a product marked codAllowed: false.
+        const effectivePaymentMethod = !priced.codAvailable ? "SSLCommerz" : paymentMethod;
+        const isCOD = effectivePaymentMethod === "COD";
 
-        const isCOD = paymentMethod === "COD";
-        const orderAmountAfterDiscount = itemsSubtotal - discountAmount;
+        // ─── Step 4: Coupon (an invalid code must not break the preview) ──
+        let couponMessage = "";
+        let validCoupon;
+        if (couponCode) {
+            const couponResult = await applyCouponLogic(
+                couponCode.toUpperCase(),
+                itemsSubtotal,
+                userId,
+                lines,
+            );
+            couponMessage = couponResult.validationMessage;
+            if (couponMessage === "Coupon applied successfully") validCoupon = couponCode.toUpperCase();
+        }
 
-        // ─── Step 7: District/Upazila validation (Home Delivery only) ─────
+        const lineSummary = lines.map((l) => ({
+            product: l.product,
+            name: l.name,
+            variant: l.variant,
+            quantity: l.quantity,
+            unitPrice: l.price,
+            lineTotal: l.lineTotal,
+            weightKg: l.weightKg,
+        }));
+
+        // ─── Step 5: District/Upazila (Home Delivery only) ────────────────
         let upazila = null;
-
         if (finalDeliveryType === "Home Delivery") {
             if (!shippingAddress || !shippingAddress.district || !shippingAddress.upazila) {
                 return res.status(200).json({
                     success: true,
                     data: {
-                        itemsSubtotal: parseFloat(itemsSubtotal.toFixed(2)),
-                        discountAmount: parseFloat(discountAmount.toFixed(2)),
+                        itemsSubtotal,
+                        discountAmount: 0,
                         shippingPrice: 0,
                         taxPrice: 0,
-                        finalTotal: parseFloat((itemsSubtotal - discountAmount).toFixed(2)),
+                        finalTotal: itemsSubtotal,
                         locationType,
                         deliveryType: finalDeliveryType,
-                        paymentMethod,
+                        paymentMethod: effectivePaymentMethod,
                         isCOD,
+                        codAvailable: priced.codAvailable,
                         codCharge: 0,
                         codOnlinePaymentAmount: 0,
                         remainingAmount: 0,
+                        totalWeightKg,
                         courierBranch: null,
                         couponMessage,
+                        lines: lineSummary,
                         message: "Please provide complete shipping address for delivery",
                     },
                 });
@@ -375,111 +338,27 @@ export const calculateCheckoutData = async (req, res, next) => {
             if (!districtDoc) {
                 return res.status(400).json({ success: false, message: "Invalid district" });
             }
-
             upazila = districtDoc.upazilas.find((u) => u.name === shippingAddress.upazila);
             if (!upazila) {
                 return res.status(400).json({ success: false, message: "Invalid upazila" });
             }
         }
 
-        // ─── Step 8: Shipping rate from DB ────────────────────────────────
-        const rateDoc = await ShippingRate.findOne({
+        // ─── Step 6: Totals, same function createOrder uses ───────────────
+        const pricing = await computeOrderTotals({
+            itemsSubtotal,
+            couponCode: validCoupon,
+            userId,
             locationType,
             deliveryType: finalDeliveryType,
-            isActive: true,
+            isCOD,
+            items: lines,
+            totalWeightKg,
         });
-
-        if (!rateDoc) {
-            return res.status(400).json({
-                success: false,
-                message: "Shipping rate configuration not found. Please contact support.",
-            });
+        if (!pricing.ok) {
+            return res.status(pricing.status).json({ success: false, message: pricing.message });
         }
 
-        // ─── Step 8b: Flat shipping charge (admin-configured per zone) ────
-        // FIX (Phase 3 bug): this used to be `baseCharge * totalQuantity`
-        // ("per item shipping"), inherited from a previous project selling
-        // heavy items (fans) where shipping genuinely scales with each unit.
-        // Stationery items are light — the owner sets ONE flat charge per
-        // locationType + deliveryType from the admin panel (e.g. 70/100/130/170)
-        // and that charge applies once per order, regardless of quantity.
-        let totalShippingPrice = rateDoc.baseCharge;
-
-        // ─── Apply free shipping threshold on subtotal ────────────────────
-        if (
-            rateDoc.freeShippingThreshold &&
-            orderAmountAfterDiscount >= rateDoc.freeShippingThreshold
-        ) {
-            totalShippingPrice = 0;
-        } else if (
-            rateDoc.reducedShippingThreshold &&
-            rateDoc.reducedShippingAmount !== null &&
-            orderAmountAfterDiscount >= rateDoc.reducedShippingThreshold
-        ) {
-            totalShippingPrice = Math.min(rateDoc.baseCharge, rateDoc.reducedShippingAmount);
-        }
-
-        if (isFreeShippingByCoupon) {
-            totalShippingPrice = 0;
-        }
-
-        const baseShippingPrice = totalShippingPrice;
-
-        // kept for response/debugging visibility only — no longer used in the price math
-        const totalQuantity = itemsToProcess.reduce(
-            (acc, item) => acc + (parseInt(item.quantity) || 1),
-            0,
-        );
-
-        // ─── COD Charge calculation ────────────────────────────────────────
-        console.log("=== COD Charge Debug ===");
-        console.log("RateDoc codChargeType:", rateDoc.codChargeType);
-        console.log("RateDoc codChargeValue:", rateDoc.codChargeValue);
-        console.log("orderAmountAfterDiscount:", orderAmountAfterDiscount);
-        console.log("isCOD:", isCOD);
-        const codCharge = isCOD ? calculateCODCharge(rateDoc, orderAmountAfterDiscount) : 0;
-        console.log("Calculated COD Charge:", codCharge);
-
-        // ─── Shipping breakdown ────────────────────────────────────────────
-        const shippingBreakdown = {
-            flatCharge: baseShippingPrice,
-            totalQuantity: totalQuantity, // informational only, not used in price calc
-            totalShipping: totalShippingPrice,
-        };
-
-        // ─── COD Payment breakdown ─────────────────────────────────────────
-        let codOnlinePaymentAmount = 0;
-        let remainingAmount = 0;
-        let finalTotal = 0;
-        let displayTotal = 0;
-
-        if (isCOD) {
-            codOnlinePaymentAmount = baseShippingPrice + codCharge;
-            remainingAmount = orderAmountAfterDiscount;
-            finalTotal = orderAmountAfterDiscount + baseShippingPrice + codCharge;
-            displayTotal = finalTotal;
-        } else {
-            codOnlinePaymentAmount = 0;
-            remainingAmount = 0;
-            finalTotal = orderAmountAfterDiscount + baseShippingPrice;
-            displayTotal = finalTotal;
-        }
-
-        // ─── Step 9: Tax calculation ──────────────────────────────────────
-        const taxRate = parseFloat(process.env.VAT_RATE) || 0;
-        let taxPrice = 0;
-
-        if (isCOD) {
-            taxPrice = remainingAmount * taxRate;
-            finalTotal = finalTotal + taxPrice;
-            displayTotal = finalTotal;
-        } else {
-            taxPrice = (orderAmountAfterDiscount + baseShippingPrice) * taxRate;
-            finalTotal = finalTotal + taxPrice;
-            displayTotal = finalTotal;
-        }
-
-        // ─── Step 10: Estimated delivery ──────────────────────────────────
         let estimatedDelivery = "";
         if (locationType === "dhaka_inside") {
             estimatedDelivery = "1-2 days";
@@ -489,46 +368,47 @@ export const calculateCheckoutData = async (req, res, next) => {
             estimatedDelivery = finalDeliveryType === "Courier" ? "2-4 days" : "3-5 days";
         }
 
-        // ─── Final Response ────────────────────────────────────────────────
+        const subtotalAfterDiscount = parseFloat((itemsSubtotal - pricing.discountAmount).toFixed(2));
+
         res.status(200).json({
             success: true,
             data: {
-                itemsSubtotal: parseFloat(itemsSubtotal.toFixed(2)),
-                discountAmount: parseFloat(discountAmount.toFixed(2)),
-                shippingPrice: parseFloat(baseShippingPrice.toFixed(2)),
-                taxPrice: parseFloat(taxPrice.toFixed(2)),
-                codCharge: parseFloat(codCharge.toFixed(2)),
-                codOnlinePaymentAmount: parseFloat(codOnlinePaymentAmount.toFixed(2)),
-                remainingAmount: parseFloat(remainingAmount.toFixed(2)),
-                finalTotal: parseFloat(displayTotal.toFixed(2)),
+                itemsSubtotal,
+                discountAmount: pricing.discountAmount,
+                shippingPrice: pricing.shippingPrice,
+                taxPrice: pricing.taxPrice,
+                codCharge: pricing.codCharge,
+                codOnlinePaymentAmount: pricing.codOnlinePaymentAmount,
+                remainingAmount: pricing.remainingAmount,
+                finalTotal: pricing.totalPrice,
                 estimatedDelivery,
                 shippingZone: upazila ? upazila.shippingZone : null,
                 locationType,
                 deliveryType: finalDeliveryType,
-                paymentMethod,
+                paymentMethod: effectivePaymentMethod,
                 isCOD,
+                // false: the bag has a product that must be paid in full online.
+                codAvailable: priced.codAvailable,
+                totalWeightKg,
                 courierBranch: finalDeliveryType === "Courier" ? courierBranch : null,
                 couponMessage,
-                shippingBreakdown: {
-                    flatCharge: parseFloat(shippingBreakdown.flatCharge.toFixed(2)),
-                    totalQuantity: shippingBreakdown.totalQuantity,
-                    totalShipping: parseFloat(shippingBreakdown.totalShipping.toFixed(2)),
-                },
+                lines: lineSummary,
+                shippingBreakdown: pricing.shippingBreakdown,
                 breakdown: {
-                    subtotal: parseFloat(itemsSubtotal.toFixed(2)),
-                    discount: parseFloat(discountAmount.toFixed(2)),
-                    subtotalAfterDiscount: parseFloat(orderAmountAfterDiscount.toFixed(2)),
-                    baseShipping: parseFloat(baseShippingPrice.toFixed(2)),
-                    codCharge: parseFloat(codCharge.toFixed(2)),
-                    codOnlinePayment: parseFloat(codOnlinePaymentAmount.toFixed(2)),
-                    remainingForDelivery: parseFloat(remainingAmount.toFixed(2)),
-                    tax: parseFloat(taxPrice.toFixed(2)),
-                    total: parseFloat(displayTotal.toFixed(2)),
+                    subtotal: itemsSubtotal,
+                    discount: pricing.discountAmount,
+                    subtotalAfterDiscount,
+                    baseShipping: pricing.shippingPrice,
+                    codCharge: pricing.codCharge,
+                    codOnlinePayment: pricing.codOnlinePaymentAmount,
+                    remainingForDelivery: pricing.remainingAmount,
+                    tax: pricing.taxPrice,
+                    total: pricing.totalPrice,
                 },
             },
         });
     } catch (error) {
-        console.error("Checkout calculation error:", error);
+        console.error("Checkout calculation error:", error.message);
         next(error);
     }
 };

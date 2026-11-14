@@ -2,6 +2,15 @@ import mongoose from "mongoose";
 import { verifyPayment } from "../config/sslcommerz.js";
 import Order from "../models/Order.js";
 import { updateProductStock } from "./orderController.js";
+import { debug } from "../utils/logger.js";
+
+// Partial online payment: COD charges delivery + COD fee up front and keeps
+// the online part in codOnlinePaymentAmount, the balance in remainingAmount,
+// so verification must expect that amount. (Client builds add pre-booking
+// advances here; see the Aamkahon project.)
+const isPartialOnline = (order) => order.paymentMethod === "COD";
+const onlineAmountDue = (order) =>
+    isPartialOnline(order) ? order.codOnlinePaymentAmount || 0 : order.totalPrice;
 
 const getClientUrl = () => {
     return (
@@ -55,7 +64,7 @@ const buildOrderResultUrl = (clientUrl, path, order, extraParams = {}) => {
 
 export const processSuccessRedirect = async (req, res) => {
     console.log("PROCESS SUCCESS REDIRECT CALLED");
-    console.log("Query params:", req.query);
+    debug("Query params:", req.query);
 
     try {
         const { orderId, val_id, status, tran_id } = req.query;
@@ -107,7 +116,7 @@ export const processSuccessRedirect = async (req, res) => {
         // order is treated as unverified (not paid) — never trusted by default.
         if (val_id && status === "VALID") {
             const isCOD = order.paymentMethod === "COD";
-            const expectedAmount = isCOD ? order.codOnlinePaymentAmount || 0 : order.totalPrice;
+            const expectedAmount = onlineAmountDue(order);
 
             console.log("Verifying payment:", { val_id, isCOD, expectedAmount });
 
@@ -123,7 +132,7 @@ export const processSuccessRedirect = async (req, res) => {
         }
 
         if (isVerified) {
-            if (order.paymentMethod === "COD") {
+            if (isPartialOnline(order)) {
                 const codPaidAmount = order.codOnlinePaymentAmount || 0;
                 const remainingAmount = order.remainingAmount || order.totalPrice - codPaidAmount;
                 const isFullyPaid = codPaidAmount >= order.totalPrice;
@@ -172,7 +181,7 @@ export const processSuccessRedirect = async (req, res) => {
             }
 
             try {
-                await updateProductStock(order.orderItems, "decrease");
+                await updateProductStock(order.orderItems, "decrease", null, { order, note: "Payment received" });
                 console.log("Stock updated successfully");
             } catch (stockError) {
                 console.error("Stock update error:", stockError);
@@ -294,7 +303,7 @@ export const processCancelRedirect = async (req, res) => {
 
 export const handleIPN = async (req, res) => {
     console.log("IPN RECEIVED");
-    console.log("IPN Body:", req.body);
+    debug("IPN Body:", req.body);
 
     const { tran_id, status, val_id, amount } = req.body;
 
@@ -311,13 +320,13 @@ export const handleIPN = async (req, res) => {
             return res.status(404).send("Order Not Found");
         }
 
-        if (order.orderStatus === "Processing" || order.orderStatus === "Confirmed") {
+        if (["Processing", "Confirmed"].includes(order.orderStatus)) {
             console.log(`IPN: Order ${tran_id} already processed`);
             return res.status(200).send("IPN Handled (Already Processed)");
         }
 
         const isCODOrder = order.paymentMethod === "COD";
-        const expectedAmount = isCODOrder ? order.codOnlinePaymentAmount || 0 : order.totalPrice;
+        const expectedAmount = onlineAmountDue(order);
 
         console.log("IPN Expected amount:", {
             isCODOrder,
@@ -328,7 +337,7 @@ export const handleIPN = async (req, res) => {
         const verificationResult = await verifyPayment(val_id, tran_id, expectedAmount);
 
         if (verificationResult.isValid) {
-            if (isCODOrder) {
+            if (isPartialOnline(order)) {
                 const codPaidAmount = order.codOnlinePaymentAmount || 0;
                 const remainingAmount = order.remainingAmount || order.totalPrice - codPaidAmount;
 
@@ -348,7 +357,7 @@ export const handleIPN = async (req, res) => {
                     remaining_amount: remainingAmount,
                 };
 
-                await updateProductStock(order.orderItems, "decrease");
+                await updateProductStock(order.orderItems, "decrease", null, { order, note: "Payment received" });
 
                 order.adminNotes = order.adminNotes || [];
                 order.adminNotes.push({
@@ -373,7 +382,7 @@ export const handleIPN = async (req, res) => {
                     remaining_amount: 0,
                 };
 
-                await updateProductStock(order.orderItems, "decrease");
+                await updateProductStock(order.orderItems, "decrease", null, { order, note: "Payment received" });
             }
 
             order.statusHistory.push({

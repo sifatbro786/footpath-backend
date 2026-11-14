@@ -14,7 +14,15 @@ const orderItemSchema = new mongoose.Schema({
     },
     quantity: { type: Number, required: true },
     price: { type: Number, required: true },
+    // Catalogue price at order time (differs from `price` only on phone
+    // orders where the admin typed a negotiated price).
+    retailPrice: { type: Number },
+    unit: { type: String },
+    weightKg: { type: Number, default: 0 },
     image: { type: String },
+    // Phone orders only: admin typed the unit price (negotiated on the call).
+    // retailPrice still holds the catalogue price for comparison.
+    priceOverridden: { type: Boolean, default: false },
 });
 
 const shippingAddressSchema = new mongoose.Schema(
@@ -22,16 +30,12 @@ const shippingAddressSchema = new mongoose.Schema(
         name: { type: String, required: true },
         phone: { type: String, required: true },
         email: { type: String },
+        // Not needed for courier pickup, in any zone (Dhaka can have courier
+        // branches now). Every order since the base stores deliveryType.
         addressLine1: {
             type: String,
             required: function () {
-                const deliveryType = this.deliveryType;
-                const locationType = this.locationType;
-                return (
-                    deliveryType === "Home Delivery" ||
-                    locationType === "dhaka_inside" ||
-                    locationType === "dhaka_sub"
-                );
+                return this.deliveryType !== "Courier";
             },
         },
         addressLine2: { type: String },
@@ -124,6 +128,11 @@ const shippingBreakdownSchema = new mongoose.Schema(
             type: Number,
             default: 0,
         },
+        // Weight-based breakdown (flatCharge = the zone's baseCharge).
+        totalWeightKg: { type: Number, default: 0 },
+        extraWeightKg: { type: Number, default: 0 },
+        perKgCharge: { type: Number, default: 0 },
+        weightCharge: { type: Number, default: 0 },
     },
     { _id: false },
 );
@@ -170,9 +179,18 @@ const orderSchema = new mongoose.Schema(
         paymentMethod: {
             type: String,
             required: true,
-            enum: ["COD", "SSLCommerz"],
+            // Manual = phone order paid outside the site (cash, personal bKash,
+            // bank). Never goes through the gateway; see manualPayment.
+            enum: ["COD", "SSLCommerz", "Manual"],
         },
         paymentResult: paymentResultSchema,
+        // web = storefront checkout, phone = created by an admin from a call.
+        orderSource: { type: String, enum: ["web", "phone"], default: "web", index: true },
+        manualPayment: {
+            method: { type: String, enum: ["cash", "bkash", "nagad", "rocket", "bank", "card", "other"] },
+            reference: { type: String, trim: true, maxlength: 120 },
+            paidAmount: { type: Number, min: 0, default: 0 },
+        },
         shippingPrice: {
             type: Number,
             required: true,
@@ -213,10 +231,13 @@ const orderSchema = new mongoose.Schema(
         },
         paymentStatus: {
             type: String,
-            enum: ["Pending", "Paid", "Failed", "Refunded"],
+            // Partial: phone order with an advance taken (manualPayment.paidAmount).
+            enum: ["Pending", "Partial", "Paid", "Failed", "Refunded"],
             default: "Pending",
         },
         statusHistory: [orderStatusHistorySchema],
+
+        totalWeightKg: { type: Number, default: 0 },
 
         codCharge: {
             type: Number,

@@ -14,8 +14,8 @@ import Order from "../models/Order.js";
 import Product from "../models/Product.js";
 import { ShippingRate } from "../models/ShippingConfig.js";
 
-export const isHomeDeliveryOnly = (locationType) =>
-    locationType === "dhaka_inside" || locationType === "dhaka_sub";
+// isHomeDeliveryOnly removed: delivery options are data driven now
+// (services/deliveryOptions.js), Dhaka can have courier branches.
 
 export const calculateCODCharge = (rateDoc, orderAmountAfterDiscount) => {
     if (rateDoc.codChargeType === "percentage") {
@@ -202,15 +202,20 @@ export const applyCouponLogic = async (couponCode, itemsSubtotal, userId, items 
 };
 
 /**
- * Flat, admin-configured shipping charge for a given zone/delivery-type,
- * applied once per order (see MIGRATION_NOTES.md — this used to be
- * multiplied by item quantity, which was wrong for lightweight stationery).
+ * Weight-based, admin-configured shipping for a zone/delivery type.
+ *
+ * charge = baseCharge + ceil(max(0, totalWeightKg - baseWeightKg)) * perKgCharge
+ *
+ * Heavy goods (food, furniture) cost more to courier. perKgCharge = 0
+ * reproduces the old flat charge exactly, so light stores change nothing.
+ * Free/reduced thresholds and free-shipping coupons still apply on top.
  */
 export const calculateShippingCharge = async ({
     locationType,
     deliveryType,
     orderAmountAfterDiscount,
     isFreeShippingByCoupon = false,
+    totalWeightKg = 0,
 }) => {
     const rateDoc = await ShippingRate.findOne({
         locationType,
@@ -226,7 +231,13 @@ export const calculateShippingCharge = async ({
         };
     }
 
-    let shippingPrice = rateDoc.baseCharge;
+    const perKg = Number(rateDoc.perKgCharge) || 0;
+    const extraWeightKg =
+        perKg > 0 ? Math.ceil(Math.max(0, totalWeightKg - (Number(rateDoc.baseWeightKg) || 0))) : 0;
+    const weightCharge = extraWeightKg * perKg;
+    const fullCharge = rateDoc.baseCharge + weightCharge;
+
+    let shippingPrice = fullCharge;
 
     if (
         rateDoc.freeShippingThreshold &&
@@ -238,14 +249,26 @@ export const calculateShippingCharge = async ({
         rateDoc.reducedShippingAmount !== null &&
         orderAmountAfterDiscount >= rateDoc.reducedShippingThreshold
     ) {
-        shippingPrice = Math.min(rateDoc.baseCharge, rateDoc.reducedShippingAmount);
+        shippingPrice = Math.min(fullCharge, rateDoc.reducedShippingAmount);
     }
 
     if (isFreeShippingByCoupon) {
         shippingPrice = 0;
     }
 
-    return { rateDoc, shippingPrice, error: null };
+    return {
+        rateDoc,
+        shippingPrice,
+        error: null,
+        breakdown: {
+            flatCharge: rateDoc.baseCharge,
+            totalWeightKg: Math.round(totalWeightKg * 100) / 100,
+            extraWeightKg,
+            perKgCharge: perKg,
+            weightCharge,
+            totalShipping: shippingPrice,
+        },
+    };
 };
 
 export const calculateTax = (taxableAmount) => {
@@ -270,6 +293,7 @@ export const computeOrderTotals = async ({
     deliveryType,
     isCOD,
     items = [],
+    totalWeightKg = 0,
 }) => {
     const taxRate = parseFloat(process.env.VAT_RATE) || 0;
 
@@ -282,11 +306,12 @@ export const computeOrderTotals = async ({
 
     const orderAmountAfterDiscount = itemsSubtotal - discountAmount;
 
-    const { rateDoc, shippingPrice, error } = await calculateShippingCharge({
+    const { rateDoc, shippingPrice, error, breakdown } = await calculateShippingCharge({
         locationType,
         deliveryType,
         orderAmountAfterDiscount,
         isFreeShippingByCoupon,
+        totalWeightKg,
     });
     if (error) {
         return { ok: false, status: 400, message: error };
@@ -324,5 +349,6 @@ export const computeOrderTotals = async ({
         taxPrice,
         totalPrice: finalTotal,
         couponId: couponResult.couponId || null,
+        shippingBreakdown: breakdown,
     };
 };

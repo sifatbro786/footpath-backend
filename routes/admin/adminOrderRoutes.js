@@ -11,6 +11,7 @@ import {
     updateOrderDetails,
 } from "../../controllers/orderController.js";
 import { protect, admin } from "../../middlewares/authMiddleware.js";
+import { createManualOrder, previewManualOrder } from "../../controllers/admin/manualOrderController.js";
 
 const router = express.Router();
 
@@ -20,6 +21,10 @@ router.use(protect, admin);
 router.route("/").get(getAllOrders);
 
 router.route("/stats").get(getOrderStats);
+
+// Phone orders. Literal paths, so they sit above "/:id".
+router.post("/manual/preview", previewManualOrder);
+router.post("/manual", createManualOrder);
 router
     .route("/:id")
     .get(getOrderByIdAdmin)

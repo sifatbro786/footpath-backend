@@ -30,6 +30,8 @@ const HeroContentSchema = mongoose.Schema(
         },
 
         // Media fields
+        // Short slide label for a slider indicator (e.g. "New arrivals").
+        label: { type: String, trim: true, maxlength: 40, default: "" },
         mediaType: {
             // 'video' or 'image'
             type: String,

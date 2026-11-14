@@ -131,8 +131,10 @@ export const getProductReviews = async (req, res) => {
             filter.rating = parseInt(rating);
         }
 
+        // Public endpoint: reviewer NAME only. The base populated "name email",
+        // publishing every reviewer's email address (base candidate).
         const reviews = await Review.find(filter)
-            .populate("user", "name email")
+            .populate("user", "name")
             .sort({ [sortBy]: sortOrder === "desc" ? -1 : 1 })
             .limit(limit * 1)
             .skip((page - 1) * limit);

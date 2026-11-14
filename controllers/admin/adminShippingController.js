@@ -1,6 +1,5 @@
 // controllers/admin.shippingController.js
 import { CourierBranch, District, ShippingRate } from "../../models/ShippingConfig.js";
-import { isHomeDeliveryOnly } from "../../services/pricingService.js";
 
 // ==================== DISTRICTS ====================
 
@@ -272,6 +271,8 @@ export const createShippingRate = async (req, res) => {
             locationType,
             deliveryType,
             baseCharge,
+            baseWeightKg,
+            perKgCharge,
             codChargeType,
             codChargeValue,
             freeShippingThreshold,
@@ -284,17 +285,6 @@ export const createShippingRate = async (req, res) => {
             return res.status(400).json({
                 success: false,
                 message: "locationType, deliveryType, and baseCharge are required",
-            });
-        }
-
-        // Dhaka Inside / Dhaka Sub are Home Delivery only — same rule checkout
-        // enforces via isHomeDeliveryOnly. Without this guard an admin could
-        // create a (dhaka_inside, Courier) rate that checkout would simply
-        // never look up, silently orphaning it.
-        if (deliveryType === "Courier" && isHomeDeliveryOnly(locationType)) {
-            return res.status(400).json({
-                success: false,
-                message: `Courier is not available for ${locationType}. Only Home Delivery is supported for this zone.`,
             });
         }
 
@@ -311,6 +301,8 @@ export const createShippingRate = async (req, res) => {
             locationType,
             deliveryType,
             baseCharge,
+            baseWeightKg,
+            perKgCharge,
             codChargeType,
             codChargeValue,
             freeShippingThreshold,
@@ -335,6 +327,8 @@ export const updateShippingRate = async (req, res) => {
         const { id } = req.params;
         const {
             baseCharge,
+            baseWeightKg,
+            perKgCharge,
             codChargeType,
             codChargeValue,
             freeShippingThreshold,
@@ -349,6 +343,8 @@ export const updateShippingRate = async (req, res) => {
         }
 
         if (baseCharge !== undefined) rate.baseCharge = baseCharge;
+        if (baseWeightKg !== undefined) rate.baseWeightKg = baseWeightKg;
+        if (perKgCharge !== undefined) rate.perKgCharge = perKgCharge;
         if (codChargeType) rate.codChargeType = codChargeType;
         if (codChargeValue !== undefined) rate.codChargeValue = codChargeValue;
         if (freeShippingThreshold !== undefined) rate.freeShippingThreshold = freeShippingThreshold;

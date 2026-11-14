@@ -135,12 +135,11 @@ so any new list endpoint MUST select those two fields and spread the resolver's
 result. Do not reintroduce a per-endpoint discount block. `getProductBySlug`
 still has its own inline copy (single-doc path) — fold it in if you touch it.
 
-### 9. Category filtering does not walk the tree
+### 9. Category filtering walks the tree
 
-`getProducts` filters `{ $or: [{category: id}, {subCategory: id}] }` with no
-descendant resolution. Browsing a parent category misses everything filed under
-its children. The frontend has `collectSubtreeIds()` ready in
-`src/lib/store/categoryTree.js`; widening needs this endpoint to accept a list.
+**Fixed (2026-11-14, from Aamkahon):** `getProducts` and `getProductsByAttributes`
+resolve the category (id or slug) plus all descendants via `utils/categoryTree.js`.
+Before, a parent category missed every product filed under its subcategories.
 
 ### 10. Route ordering
 
@@ -151,26 +150,58 @@ literal as a param. Currently relied on by:
 
 ---
 
+## Fixed on 2026-11-14 (ported from Aamkahon, the reference build)
+
+- **Guest price tampering (critical):** createOrder and the checkout preview priced
+  guest lines from `guestItems[].price`. Every line now goes through
+  `services/lineItemPricing.js` (live DB price, variant match, stock, weight).
+  Checkout calculate is rebuilt on `computeOrderTotals`, so preview and charge
+  cannot drift; an invalid coupon no longer fails the preview (`couponMessage`).
+- **Delivery options are data driven** (`services/deliveryOptions.js`): a type
+  shows when its rate is active; Courier also needs the district to have branches.
+  Dhaka can have courier pickup. `courierBranch` must be one of the admin's
+  branches. `isHomeDeliveryOnly` is gone.
+- **Weight shipping (optional):** `ShippingRate.baseWeightKg` + `perKgCharge`
+  (0 = old flat charge). Variant `weight` (kg) falls back to product `weight`.
+- **Product form can no longer undo stock:** `updateProduct` ignores stock from
+  the body and carries variant stock over by options. Stock changes go through
+  `/api/admin/stock/adjust` and orders.
+- **Stock ledger:** `models/StockMovement.js`, `services/stockLedger.js`;
+  `updateProductStock(items, action, session, meta)` logs every change.
+  `/api/admin/stock` (levels, `POST /adjust`, `GET /movements`).
+- **Phone orders + invoice data:** `controllers/admin/manualOrderController.js`,
+  `POST /api/admin/orders/manual/preview` and `/manual`. Order gets
+  `paymentMethod "Manual"`, `orderSource "phone"`, `manualPayment`, payment status
+  `Partial`. Admin may type a unit price (`priceOverridden`) and delivery charge;
+  totals are still computed server side.
+- **Customer list:** `models/Customer.js` (phone normalised by `utils/phone.js`),
+  `/api/admin/customers` (list, CRUD, `POST /import` for CSV rows, `GET /export`).
+  Orders add customers automatically; backfill with `npm run sync:customers`.
+- **Online only products:** `Product.codAllowed` (false hides COD; calculate
+  returns `codAvailable`).
+- dotenv loads first (`import "dotenv/config"`), `trust proxy` in production,
+  SMTP `secure` from `SMTP_SECURE` + TLS checks in production + brand colour from
+  `MAIL_BRAND_COLOR`, reviews no longer expose reviewer emails, `/api/hero` returns
+  full `items`, hero video upload (`POST /api/admin/upload/hero-video`), currency
+  default BDT, `MONGODB_URI` accepted, `npm start` = node.
+- Campaign cron runs under a Mongo lock (`services/jobLock.js`), safe with pm2
+  cluster or two servers.
+- PII no longer logged: `utils/logger.js` (`debug()` only with LOG_LEVEL=debug,
+  values redacted). IPN bodies, query params, product dumps go through it.
+- Unused deps removed: pg, body-parser, node-fetch, express-async-handler,
+  cloudinary, multer-storage-cloudinary, http-errors, cookie-parser, mongodb.
+  Run `npm install` once to refresh the lock file.
+
 ## Known open issues
 
-- `save({ validateBeforeSave: false })` throughout the payment flow: validation
-  is skipped exactly where money moves.
-- Campaign cron (`server.js`) runs every minute in-process with no distributed
-  lock. A multi-instance deploy will double-apply campaigns. Also logs on every
-  tick.
-- `console.log` everywhere, including full IPN bodies and order payloads (PII in
-  logs). Needs a structured logger with redaction.
-- Unused dependencies: `pg`, `body-parser`, `node-fetch`, `express-async-handler`.
-- No tests, no `.env.example`, no API docs.
-- `navbarItemSchema` pre-save builds `path` as `/category/<ObjectId>` rather than
-  the slug, so the stored path is unusable as a link. The frontend works around
-  it by building hrefs from the populated `category.slug`.
-- CORS allows origin-less requests unconditionally (`!origin || origin === "null"`).
-  Fine for Postman, should be gated on `NODE_ENV` in production.
-- Password minimum is 6 characters with no complexity or breach check, and there
-  is no account lockout after repeated failed logins (only an IP rate limit).
-
----
+- `save({ validateBeforeSave: false })` throughout the payment flow.
+- `navbarItemSchema` pre-save builds `path` as `/category/<ObjectId>` (frontend
+  builds hrefs from the populated slug instead).
+- CORS allows origin-less requests (needed for the SSLCommerz IPN).
+- Password minimum is 6 characters, no lockout beyond the IP rate limit.
+- `User.shippingAddress` and `Order.shippingAddress` use different schemas.
+- No tests, no API docs. Elmate branding still hardcoded in some storefront
+  files (frontend `src/config/site.js` exists for admin documents).
 
 ## Conventions
 

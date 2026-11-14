@@ -6,6 +6,17 @@ import Product from "../models/Product.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
 
 import { deleteImageFile } from "../middlewares/upload.js";
+import { recordProductEditDiff } from "../services/stockLedger.js";
+import { categoryFilterFor } from "../utils/categoryTree.js";
+import { debug } from "../utils/logger.js";
+
+// Multipart forms send numbers as strings and "" for empty; empty variant
+// weight means "use the product weight".
+const toNullableNumber = (v) => (v === undefined || v === null || v === "" ? null : parseFloat(v));
+// Multipart forms send booleans as strings.
+const normalizeProductFlags = (body) => {
+    if (body.codAllowed !== undefined) body.codAllowed = !(body.codAllowed === false || body.codAllowed === "false");
+};
 
 const calculatePrice = (basePrice, discountType, discountValue) => {
     const base = parseFloat(basePrice) || 0;
@@ -91,7 +102,8 @@ export const resolveCampaignPricing = (productObj) => {
 
 export const createProduct = async (req, res) => {
     try {
-        console.log("Received product data:", req.body);
+        normalizeProductFlags(req.body);
+        debug("Received product data:", req.body);
         const errors = validationResult(req);
         if (req.file) {
             req.body.mainImage = `${process.env.BASE_URL || "http://localhost:5010"}/uploads/products/${req.file.filename}`;
@@ -240,6 +252,7 @@ export const createProduct = async (req, res) => {
                             productData.discountValue ||
                             0,
                         stock: existingVariant?.stock || 0, // Default stock 0 for new variants
+                        weight: toNullableNumber(existingVariant?.weight),
                         imageGroupName: existingVariant?.imageGroupName || "",
                         sku: existingVariant?.sku || `${productData.sku || "PROD"}-${index + 1}`,
                     };
@@ -297,6 +310,7 @@ export const createProduct = async (req, res) => {
                         discountValue: variantDiscountValue,
                         price: variantPrice, //  calculated price
                         stock: parseInt(variant.stock) || 0,
+                        weight: toNullableNumber(variant.weight),
                         imageGroupName: variant.imageGroupName || "",
                         sku: variant.sku || "",
                     };
@@ -379,7 +393,7 @@ export const createProduct = async (req, res) => {
             productData.metaKeywords = req.body.metaKeywords;
         }
 
-        console.log("Processed product data:", productData);
+        debug("Processed product data:", productData);
         console.log(
             `Variant Info: hasVariants=${productData.hasVariants}, variantCount=${productData.variants?.length || 0}`,
         );
@@ -387,6 +401,9 @@ export const createProduct = async (req, res) => {
         // Create product
         const product = new Product(productData);
         const savedProduct = await product.save();
+        // Opening stock goes into the ledger so later history adds up from zero.
+        recordProductEditDiff({ _id: savedProduct._id, hasVariants: savedProduct.hasVariants, stock: 0, variants: [] }, savedProduct, req.user?._id, "Opening stock")
+            .catch(() => {});
 
         // Populate category and subCategory for response
         await savedProduct.populate("category subCategory");
@@ -480,7 +497,9 @@ export const getProducts = async (req, res) => {
         let filter = { isActive: true };
 
         if (category) {
-            filter.$or = [{ category: category }, { subCategory: category }];
+            // Includes descendant categories (a parent category used to miss
+            // every product filed under its subcategories); utils/categoryTree.js.
+            filter.$or = await categoryFilterFor(category);
         }
 
         if (minPrice || maxPrice) {
@@ -1066,6 +1085,7 @@ export const getAdminProductsOptimized = async (req, res) => {
 
 export const updateProduct = async (req, res) => {
     try {
+        normalizeProductFlags(req.body);
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
             return res.status(400).json({
@@ -1265,6 +1285,7 @@ export const updateProduct = async (req, res) => {
                             productData.discountValue ||
                             0,
                         stock: existingVariant?.stock || 0,
+                        weight: toNullableNumber(existingVariant?.weight),
                         imageGroupName: existingVariant?.imageGroupName || "",
                         sku: existingVariant?.sku || `${productData.sku || "PROD"}-${index + 1}`,
                     };
@@ -1316,6 +1337,7 @@ export const updateProduct = async (req, res) => {
                         discountValue: variantDiscountValue,
                         price: variantPrice,
                         stock: parseInt(variant.stock) || 0,
+                        weight: toNullableNumber(variant.weight),
                         imageGroupName: variant.imageGroupName || "",
                         sku: variant.sku || "",
                     };
@@ -1409,11 +1431,25 @@ export const updateProduct = async (req, res) => {
             }
         }
 
-        console.log("Updating product with data:", productData);
-        console.log("Bullet Points:", productData.bulletPoints);
+        debug("Updating product with data:", productData);
+        debug("Bullet Points:", productData.bulletPoints);
         console.log(
             `Variant Info: hasVariants=${productData.hasVariants}, variantCount=${productData.variants?.length || 0}`,
         );
+
+        // Stock is NOT edited from the product form. The form used to send an
+        // absolute number loaded minutes earlier, so an order paid in between
+        // was silently undone. Stock changes go through the Stock page (atomic
+        // + ledger) and orders only. Simple products: leave `stock` out of the
+        // update. Variant products: the variants array is replaced as a whole,
+        // so carry each variant's current stock over by its options (exact
+        // match, same rule as updateProductStock); a new variant starts at 0.
+        delete productData.stock;
+        if (Array.isArray(productData.variants) && existingProduct) {
+            const vKey = (opts = []) => opts.map((o) => `${o.name}=${o.value}`).sort().join("|");
+            const current = new Map((existingProduct.variants || []).map((v) => [vKey(v.options), v.stock || 0]));
+            productData.variants = productData.variants.map((v) => ({ ...v, stock: current.get(vKey(v.options)) ?? 0 }));
+        }
 
         const product = await Product.findByIdAndUpdate(req.params.id, productData, {
             new: true,
@@ -1426,6 +1462,8 @@ export const updateProduct = async (req, res) => {
                 message: "Product not found",
             });
         }
+        // Stock ledger: log anything that changed (variants added/removed).
+        recordProductEditDiff(existingProduct, product, req.user?._id).catch(() => {});
 
         res.status(200).json({
             success: true,
@@ -2097,7 +2135,9 @@ export const getProductsByAttributes = async (req, res) => {
 
         // অন্যান্য ফিল্টার
         if (category) {
-            filter.$or = [{ category: category }, { subCategory: category }];
+            // Includes descendant categories (a parent category used to miss
+            // every product filed under its subcategories); utils/categoryTree.js.
+            filter.$or = await categoryFilterFor(category);
         }
 
         if (minPrice || maxPrice) {

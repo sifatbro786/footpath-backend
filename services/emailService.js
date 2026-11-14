@@ -12,17 +12,26 @@ if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
 const SMTP_CONFIG = {
     host: process.env.SMTP_HOST || "smtp.gmail.com",
     port: Number(process.env.SMTP_PORT) || 587,
-    secure: false,
+    // Port 465 is implicit TLS and hangs with secure:false. Read it from env
+    // instead of hardcoding, defaulting to true only for 465.
+    secure: process.env.SMTP_SECURE
+        ? process.env.SMTP_SECURE === "true"
+        : Number(process.env.SMTP_PORT) === 465,
     auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
     },
     tls: {
-        rejectUnauthorized: false,
+        // Only relax certificate checks outside production (self-signed dev relays).
+        rejectUnauthorized: process.env.NODE_ENV === "production",
     },
 };
 
 const SITE_NAME = process.env.SITE_NAME || "Footpath";
+// Email accent colours come from env so each client store rebrands without
+// touching templates.
+const BRAND_COLOR = process.env.MAIL_BRAND_COLOR || "#ff6b35";
+const BRAND_COLOR_DARK = process.env.MAIL_BRAND_COLOR_DARK || "#e55a2b";
 
 const transporter = nodemailer.createTransport(SMTP_CONFIG);
 
@@ -39,20 +48,28 @@ transporter.verify(function (error, success) {
     }
 });
 
+const escapeHtml = (v) =>
+    String(v ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
 // Email templates
 const emailTemplates = {
     emailVerification: (data) => ({
         subject: `Email Verification - ${SITE_NAME}`,
         html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <div style="background: #ff6b35; color: white; padding: 20px; text-align: center;">
+        <div style="background: ${BRAND_COLOR}; color: white; padding: 20px; text-align: center;">
           <h1>${SITE_NAME}</h1>
         </div>
         <div style="padding: 20px; background: #f9f9f9;">
           <h2>Hello ${data.name},</h2>
           <p>Your verification code is:</p>
           <div style="text-align: center; margin: 20px 0;">
-            <div style="background: #ff6b35; color: white; font-size: 24px; font-weight: bold; padding: 15px; border-radius: 5px; display: inline-block;">
+            <div style="background: ${BRAND_COLOR}; color: white; font-size: 24px; font-weight: bold; padding: 15px; border-radius: 5px; display: inline-block;">
               ${data.otp}
             </div>
           </div>
@@ -66,7 +83,7 @@ const emailTemplates = {
         subject: `🎁 Special Offer Just For You! ${data.discountValue}${data.discountType === "percentage" ? "%" : "৳"} Off - ${SITE_NAME}`,
         html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 10px; overflow: hidden;">
-        <div style="background: linear-gradient(135deg, #ff6b35, #ff8e35); color: white; padding: 25px; text-align: center;">
+        <div style="background: linear-gradient(135deg, ${BRAND_COLOR}, #ff8e35); color: white; padding: 25px; text-align: center;">
           <h1 style="margin: 0; font-size: 28px;">${SITE_NAME}</h1>
           <p style="margin: 5px 0 0 0; opacity: 0.9;">Don't Miss This Special Offer!</p>
         </div>
@@ -78,25 +95,25 @@ const emailTemplates = {
             so we've prepared a special discount just for you!
           </p>
           
-          <div style="background: #fff9f5; border: 2px dashed #ff6b35; border-radius: 15px; padding: 25px; text-align: center; margin: 25px 0;">
-            <h3 style="color: #ff6b35; margin: 0 0 10px 0; font-size: 22px;">${data.promotionName}</h3>
-            <div style="font-size: 42px; font-weight: bold; color: #ff6b35; margin: 15px 0;">
+          <div style="background: #fff9f5; border: 2px dashed ${BRAND_COLOR}; border-radius: 15px; padding: 25px; text-align: center; margin: 25px 0;">
+            <h3 style="color: ${BRAND_COLOR}; margin: 0 0 10px 0; font-size: 22px;">${data.promotionName}</h3>
+            <div style="font-size: 42px; font-weight: bold; color: ${BRAND_COLOR}; margin: 15px 0;">
               ${data.discountValue}${data.discountType === "percentage" ? "%" : "৳"} OFF
             </div>
             <p style="color: #666; margin: 10px 0;">
               🎉 Use this special offer on your cart items!
             </p>
-            <div style="background: #ff6b35; color: white; padding: 8px 16px; border-radius: 20px; display: inline-block; font-size: 14px;">
+            <div style="background: ${BRAND_COLOR}; color: white; padding: 8px 16px; border-radius: 20px; display: inline-block; font-size: 14px;">
               ⏰ Expires in ${data.expiryHours} hours
             </div>
           </div>
 
           <div style="text-align: center; margin: 30px 0;">
             <a href="${process.env.FRONTEND_URL || "http://localhost:5173"}/profile?campaign=${data.campaignId}" 
-               style="background: #ff6b35; color: white; padding: 16px 40px; text-decoration: none; border-radius: 8px; 
+               style="background: ${BRAND_COLOR}; color: white; padding: 16px 40px; text-decoration: none; border-radius: 8px; 
                       font-size: 18px; font-weight: bold; display: inline-block; transition: all 0.3s;"
-               onmouseover="this.style.background='#e55a2b'; this.style.transform='translateY(-2px)';"
-               onmouseout="this.style.background='#ff6b35'; this.style.transform='translateY(0)';">
+               onmouseover="this.style.background='${BRAND_COLOR_DARK}'; this.style.transform='translateY(-2px)';"
+               onmouseout="this.style.background='${BRAND_COLOR}'; this.style.transform='translateY(0)';">
               🛒 Complete Your Purchase Now
             </a>
           </div>
@@ -127,7 +144,7 @@ const emailTemplates = {
         subject: `👀 You left items in your cart - ${SITE_NAME}`,
         html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <div style="background: #ff6b35; color: white; padding: 20px; text-align: center;">
+        <div style="background: ${BRAND_COLOR}; color: white; padding: 20px; text-align: center;">
           <h1>Don't Forget Your Items!</h1>
         </div>
         <div style="padding: 20px; background: #f9f9f9;">
@@ -162,7 +179,7 @@ const emailTemplates = {
           
           <div style="text-align: center; margin: 25px 0;">
             <a href="${process.env.FRONTEND_URL || "http://localhost:5173"}/cart" 
-               style="background: #ff6b35; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+               style="background: ${BRAND_COLOR}; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
               Continue Shopping
             </a>
           </div>
@@ -170,6 +187,7 @@ const emailTemplates = {
       </div>
     `,
     }),
+
 
     // FIX (critical): this template was missing entirely — authController.js's
     // forgotPassword calls sendEmail({ template: "passwordReset", ... }), which
@@ -179,14 +197,14 @@ const emailTemplates = {
         subject: `Password Reset OTP - ${SITE_NAME}`,
         html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <div style="background: #ff6b35; color: white; padding: 20px; text-align: center;">
+        <div style="background: ${BRAND_COLOR}; color: white; padding: 20px; text-align: center;">
           <h1>${SITE_NAME}</h1>
         </div>
         <div style="padding: 20px; background: #f9f9f9;">
           <h2>Hello ${data.name},</h2>
           <p>You requested a password reset. Use the OTP below to set a new password:</p>
           <div style="text-align: center; margin: 20px 0;">
-            <div style="background: #ff6b35; color: white; font-size: 24px; font-weight: bold; padding: 15px; border-radius: 5px; display: inline-block;">
+            <div style="background: ${BRAND_COLOR}; color: white; font-size: 24px; font-weight: bold; padding: 15px; border-radius: 5px; display: inline-block;">
               ${data.otp}
             </div>
           </div>
@@ -205,7 +223,7 @@ export const sendEmail = async (options) => {
         const template = emailTemplates[options.template](options.data);
 
         const mailOptions = {
-            from: process.env.SMTP_FROM || process.env.SMTP_USER,
+            from: process.env.MAIL_FROM || process.env.SMTP_FROM || process.env.SMTP_USER,
             to: options.email,
             subject: template.subject,
             html: template.html,

@@ -1,9 +1,12 @@
+// Must be the first import: ES module imports evaluate before this file's body,
+// so a later dotenv.config() left emailService reading undefined SMTP vars
+// (it only worked by luck of sslcommerz.js loading dotenv first).
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import compression from "compression";
 import hpp from "hpp";
-import dotenv from "dotenv";
 import morgan from "morgan";
 import { errorHandler, notFound } from "./middlewares/errorMiddleware.js";
 import { sanitizeRequest } from "./middlewares/sanitize.js";
@@ -46,6 +49,8 @@ import navbarAdminRoutes from "./routes/admin/navbarAdminRoutes.js";
 import uploadAdminRoutes from "./routes/admin/uploadAdminRoutes.js";
 import aplusContentAdminRoutes from "./routes/admin/aplusContentAdminRoutes.js";
 import pageMetaAdminRoutes from "./routes/admin/pageMetaAdminRoutes.js";
+import customerAdminRoutes from "./routes/admin/customerAdminRoutes.js";
+import stockAdminRoutes from "./routes/admin/stockAdminRoutes.js";
 
 import cron from "node-cron";
 import ProductCampaignService from "./services/productCampaignService.js";
@@ -53,12 +58,18 @@ import ProductCampaignService from "./services/productCampaignService.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import connectDB from "./config/database.js";
+import { runExclusive } from "./services/jobLock.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// Behind nginx in production: trust exactly one proxy hop so req.ip (and the
+// rate limiters keyed on it) is the visitor, not nginx. Without this every
+// shopper shares one IP and the auth/OTP limits trip for everyone.
+// Not enabled in dev, where X-Forwarded-For would be client-controlled.
+if (process.env.NODE_ENV === "production") app.set("trust proxy", 1);
 
 connectDB();
 
@@ -183,6 +194,8 @@ app.use(`/api/admin/navbar`, navbarAdminRoutes);
 app.use(`/api/admin/upload`, uploadAdminRoutes);
 app.use(`/api/admin/aplus-content`, aplusContentAdminRoutes);
 app.use(`/api/admin/page-meta`, pageMetaAdminRoutes);
+app.use(`/api/admin/customers`, customerAdminRoutes);
+app.use(`/api/admin/stock`, stockAdminRoutes);
 
 app.get("/health", (req, res) => {
     res.status(200).json({
@@ -195,7 +208,12 @@ app.get("/health", (req, res) => {
 
 cron.schedule("* * * * *", async () => {
     try {
-        const result = await ProductCampaignService.processAllActiveCampaigns();
+        // One process at a time (services/jobLock.js): safe under pm2 cluster
+        // or more than one server. 50 s TTL < the 1 minute schedule.
+        const result = await runExclusive("campaign-cron", 50_000, () =>
+            ProductCampaignService.processAllActiveCampaigns(),
+        );
+        if (result?.skipped) return;
         if (result.started.length > 0 || result.ended.length > 0) {
             console.log(`Campaign Update:`);
             if (result.started.length > 0) {
@@ -210,10 +228,7 @@ cron.schedule("* * * * *", async () => {
                     console.log(`      - ${c.name}: ${c.productsRolledBack} total roleback`),
                 );
             }
-        } else {
-            console.log(`No new campaign start or end`);
         }
-        console.log(`========================================`);
     } catch (error) {
         console.error(`Having some problem to start campaign:`, error.message);
         console.error(error);

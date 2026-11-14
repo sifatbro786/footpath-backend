@@ -9,6 +9,7 @@ import upload, {
     uploadImage,
     uploadMultipleImages,
     uploadOfferImage,
+    uploadHeroVideo,
 } from "../../controllers/uploadController.js";
 import { admin, protect } from "../../middlewares/authMiddleware.js";
 
@@ -22,5 +23,7 @@ router.post("/multiple", upload.array("images", 10), uploadMultipleImages);
 // upload.single() here or it drains the stream first (req.file becomes
 // undefined → 400) and misfiles into products/. Saves to uploads/offers/.
 router.post("/offer", uploadOfferImage);
+// Own multer inside (video types, 60 MB). Field name: "video".
+router.post("/hero-video", uploadHeroVideo);
 
 export default router;

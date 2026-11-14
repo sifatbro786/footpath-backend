@@ -251,3 +251,47 @@ export const handleUploadError = (error, req, res, next) => {
 
 // Export the multer instance
 export default upload;
+
+// ─── Hero video upload ─────────────────────────────────────────────
+// The homepage hero can be a video. Images go through the generic image
+// uploader; videos need their own size limit and type whitelist, and live in
+// uploads/hero. mp4/webm only: those are what every browser plays inline.
+const heroDir = path.join(uploadsDir, "hero");
+const heroVideoStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        if (!fs.existsSync(heroDir)) fs.mkdirSync(heroDir, { recursive: true });
+        cb(null, heroDir);
+    },
+    filename: (req, file, cb) => {
+        const ext = file.mimetype === "video/webm" ? ".webm" : ".mp4";
+        cb(null, `hero-${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
+    },
+});
+const heroVideoUpload = multer({
+    storage: heroVideoStorage,
+    limits: { fileSize: 60 * 1024 * 1024, files: 1 },
+    fileFilter: (req, file, cb) =>
+        ["video/mp4", "video/webm"].includes(file.mimetype)
+            ? cb(null, true)
+            : cb(new Error("Only MP4 or WebM videos are allowed.")),
+}).single("video");
+
+export const uploadHeroVideo = (req, res) => {
+    heroVideoUpload(req, res, (err) => {
+        if (err) {
+            const tooBig = err.code === "LIMIT_FILE_SIZE";
+            return res.status(400).json({
+                success: false,
+                message: tooBig ? "Video is larger than 60 MB. Compress it first (1080p, H.264)." : err.message,
+            });
+        }
+        if (!req.file) return res.status(400).json({ success: false, message: "No video uploaded" });
+        const baseUrl = process.env.BASE_URL || "http://localhost:5000";
+        res.status(200).json({
+            success: true,
+            url: `${baseUrl}/uploads/hero/${req.file.filename}`,
+            filename: req.file.filename,
+            size: req.file.size,
+        });
+    });
+};

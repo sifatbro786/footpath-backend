@@ -37,7 +37,7 @@ export const register = async (req, res, next) => {
     try {
         const { name, email, password, acceptTerms } = req.body;
 
-        console.log("📝 Registration attempt:", { name, email }); // Validation
+        // No PII in logs (utils/logger.js).
 
         if (!name || !email || !password) {
             return res.status(400).json({

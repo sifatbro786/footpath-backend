@@ -56,6 +56,8 @@ const variantSchema = new mongoose.Schema(
         },
         price: { type: Number, min: 0, default: 0 },
         stock: { type: Number, min: 0, default: 0 },
+        // Packed weight in kg for weight based shipping; empty = product weight.
+        weight: { type: Number, min: 0, default: null },
         imageGroupName: { type: String, trim: true },
         sku: { type: String, sparse: true },
         order: { type: Number, default: 0 },
@@ -128,7 +130,7 @@ const productSchema = new mongoose.Schema(
             },
         },
         price: { type: Number, min: 0 },
-        currency: { type: String, default: "USD" },
+        currency: { type: String, default: "BDT" },
         isUnderCampaign: {
             type: Boolean,
             default: false,
@@ -252,6 +254,10 @@ const productSchema = new mongoose.Schema(
             },
         ],
         weight: { type: Number, default: 0, min: 0 },
+        // false = must be paid in full online (item + delivery), e.g. goods sent
+        // with a courier that does not collect cash. One such line removes COD
+        // for the whole order (services/lineItemPricing.js codAvailable).
+        codAllowed: { type: Boolean, default: true },
         dimensions: {
             length: { type: Number, default: 0, min: 0 },
             width: { type: Number, default: 0, min: 0 },
